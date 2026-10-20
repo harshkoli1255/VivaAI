@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store';
 import { authApi, getApiErrorMessage } from '@/lib/api';
+import { getFacultyPortalUrl } from '@/lib/utils';
 import {
   GraduationCap,
   User,
@@ -148,7 +149,7 @@ export default function LoginPage() {
           <div role="alert" className="p-3.5 rounded bg-[var(--status-danger-bg)] border border-[var(--status-danger-border)] text-[var(--status-danger)] text-xs flex items-center gap-2.5">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{error}</span>
-            {roleMismatch && <a className="font-semibold underline" href={`${process.env.NEXT_PUBLIC_FACULTY_URL || 'http://localhost:3001'}/login`}>Open Faculty Portal</a>}
+            {roleMismatch && <a className="font-semibold underline" href={`${getFacultyPortalUrl()}/login`}>Open Faculty Portal</a>}
           </div>
         )}
 

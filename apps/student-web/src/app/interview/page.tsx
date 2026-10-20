@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/store';
 import { configsApi, sessionsApi } from '@/lib/api';
+import { getFacultyPortalUrl } from '@/lib/utils';
 import { MicCheck } from '@/components/interview/MicCheck';
 import { Badge } from '@/components/ui/Badge';
 import {
@@ -80,8 +81,7 @@ export default function InterviewSetupPage() {
     if (!isAuthenticated) {
       router.replace('/login');
     } else if (user?.role !== 'student') {
-      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      window.location.assign(`${process.env.NEXT_PUBLIC_FACULTY_URL || 'http://localhost:3001'}/login`);
+      window.location.assign(`${getFacultyPortalUrl()}/login`);
     }
   }, [hasHydrated, isAuthenticated, user?.role, router]);
 

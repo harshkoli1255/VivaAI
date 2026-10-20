@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store';
 import { useTheme } from '@/components/providers/ThemeProvider';
 import { AcousticVisualizer } from '@/components/canvas/AcousticVisualizer';
+import { getFacultyPortalUrl } from '@/lib/utils';
 import {
   ArrowRight,
   ShieldCheck,
@@ -67,7 +68,7 @@ export default function HomePage() {
   const router = useRouter();
   const { isAuthenticated, user } = useAuthStore();
   const { theme } = useTheme();
-  const facultyPortalUrl = process.env.NEXT_PUBLIC_FACULTY_URL || 'http://localhost:3001';
+  const facultyPortalUrl = getFacultyPortalUrl();
 
   const [activeStage, setActiveStage] = useState(1);
   const [demoState, setDemoState] = useState<'idle' | 'speaking' | 'listening' | 'thinking'>('speaking');

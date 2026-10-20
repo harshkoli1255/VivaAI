@@ -11,10 +11,10 @@ const nextConfig = {
     '127.0.0.1:3001',
   ],
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
-    NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000',
-    NEXT_PUBLIC_STUDENT_URL: process.env.NEXT_PUBLIC_STUDENT_URL || 'http://localhost:3000',
-    NEXT_PUBLIC_MOCK_MODE: process.env.NEXT_PUBLIC_MOCK_MODE || 'true',
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? 'https://vivaai-848e.onrender.com' : 'http://localhost:8000'),
+    NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL || (process.env.NODE_ENV === 'production' ? 'wss://vivaai-848e.onrender.com' : 'ws://localhost:8000'),
+    NEXT_PUBLIC_STUDENT_URL: process.env.NEXT_PUBLIC_STUDENT_URL || (process.env.NODE_ENV === 'production' ? 'https://viva-ai-delta.vercel.app' : 'http://localhost:3000'),
+    NEXT_PUBLIC_MOCK_MODE: process.env.NEXT_PUBLIC_MOCK_MODE || (process.env.NODE_ENV === 'production' ? 'false' : 'true'),
   },
   async headers() {
     return [

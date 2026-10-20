@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '@/store';
 import { configsApi } from '@/lib/api';
+import { getStudentPortalUrl } from '@/lib/utils';
 import { Badge } from '@/components/ui/Badge';
 import { useToast } from '@/components/providers/ToastProvider';
 import { EXAMINER_VOICES, voiceEngine } from '@/lib/speech';
@@ -43,9 +44,7 @@ export default function FacultySetupPage() {
     if (!isAuthenticated) {
       router.replace('/login');
     } else if (user?.role !== 'faculty') {
-      // Cross-origin portal handoff; auth is intentionally not copied across apps.
-      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      window.location.assign(`${process.env.NEXT_PUBLIC_STUDENT_URL || 'http://localhost:3000'}/login`);
+      window.location.assign(`${getStudentPortalUrl()}/login`);
     }
   }, [hasHydrated, isAuthenticated, user?.role, router]);
 

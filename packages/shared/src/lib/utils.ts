@@ -64,3 +64,32 @@ export function downloadBlob(blob: Blob, filename: string) {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+export function getFacultyPortalUrl(): string {
+  if (typeof window !== 'undefined') {
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    if (!isLocal) {
+      const envUrl = process.env.NEXT_PUBLIC_FACULTY_URL;
+      if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
+        return envUrl.replace(/\/$/, '');
+      }
+      return 'https://viva-ai-8asv.vercel.app';
+    }
+  }
+  return process.env.NEXT_PUBLIC_FACULTY_URL || 'http://localhost:3001';
+}
+
+export function getStudentPortalUrl(): string {
+  if (typeof window !== 'undefined') {
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    if (!isLocal) {
+      const envUrl = process.env.NEXT_PUBLIC_STUDENT_URL;
+      if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
+        return envUrl.replace(/\/$/, '');
+      }
+      return 'https://viva-ai-delta.vercel.app';
+    }
+  }
+  return process.env.NEXT_PUBLIC_STUDENT_URL || 'http://localhost:3000';
+}
+

@@ -33,6 +33,7 @@ import { useToast } from '@/components/providers/ToastProvider';
 import { VoiceSelectorModal } from '@/components/interview/VoiceSelectorModal';
 import { EXAMINER_VOICES, voiceEngine } from '@/lib/speech';
 import { sessionsApi } from '@/lib/api';
+import { getFacultyPortalUrl } from '@/lib/utils';
 import { SpeechReviewCapture, SpeechDraft } from '@/components/interview/SpeechReviewCapture';
 import { DurableRecorder, syncRecording } from '@/lib/recording';
 
@@ -240,8 +241,7 @@ export default function LiveInterviewPage() {
     if (!isAuthenticated) router.replace('/login');
     else if (user?.role !== 'student') {
       // Cross-origin portal handoff: local storage credentials are not shared between apps.
-      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      window.location.assign(`${process.env.NEXT_PUBLIC_FACULTY_URL || 'http://localhost:3001'}/login`);
+      window.location.assign(`${getFacultyPortalUrl()}/login`);
     }
   }, [hasHydrated, isAuthenticated, user?.role, router]);
 

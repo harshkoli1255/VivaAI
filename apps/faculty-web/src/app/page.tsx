@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import FacultyCohortVisualizer, { CohortClusterData } from '@/components/canvas/FacultyCohortVisualizer';
 import { dashboardApi } from '@/lib/api';
+import { getStudentPortalUrl } from '@/lib/utils';
 import { useAuthStore } from '@/store';
 import {
   AlertTriangle,
@@ -50,7 +51,7 @@ interface SessionRow {
 const EMPTY_COHORTS: CohortClusterData[] = [];
 
 export default function FacultyHomePage() {
-  const studentPortalUrl = process.env.NEXT_PUBLIC_STUDENT_URL || 'http://localhost:3000';
+  const studentPortalUrl = getStudentPortalUrl();
   const { isAuthenticated, user } = useAuthStore();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [cohortRows, setCohortRows] = useState<SessionRow[]>([]);

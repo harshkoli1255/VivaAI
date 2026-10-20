@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store';
 import { dashboardApi } from '@/lib/api';
+import { getStudentPortalUrl } from '@/lib/utils';
 import { Badge } from '@/components/ui/Badge';
 import { AlertTriangle, ArrowRight, Award, Download, Plus, RefreshCw, Search, ShieldCheck, Users } from 'lucide-react';
 
@@ -91,9 +92,7 @@ export default function AssessmentDashboardPage() {
     if (!hasHydrated) return;
     if (!isAuthenticated) router.replace('/login');
     else if (user?.role !== 'faculty') {
-      // Cross-origin portal handoff; auth is intentionally not copied across apps.
-      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      window.location.assign(`${process.env.NEXT_PUBLIC_STUDENT_URL || 'http://localhost:3000'}/login`);
+      window.location.assign(`${getStudentPortalUrl()}/login`);
     }
   }, [hasHydrated, isAuthenticated, user?.role, router]);
 

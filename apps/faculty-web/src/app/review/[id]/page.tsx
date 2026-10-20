@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/store';
 import { dashboardApi, sessionsApi, scoresApi, resolveApiUrl } from '@/lib/api';
+import { getStudentPortalUrl } from '@/lib/utils';
 import { ScoreRadarChart } from '@/components/dashboard/ScoreRadarChart';
 import { AudioTranscriptPlayer, TranscriptTurn, ProctoringEvent } from '@/components/dashboard/AudioTranscriptPlayer';
 import { Badge } from '@/components/ui/Badge';
@@ -130,9 +131,7 @@ export default function CandidateDossierPage() {
     if (!hasHydrated) return;
     if (!isAuthenticated) router.replace('/login');
     else if (user?.role !== 'faculty') {
-      // Cross-origin portal handoff; auth is intentionally not copied across apps.
-      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      window.location.assign(`${process.env.NEXT_PUBLIC_STUDENT_URL || 'http://localhost:3000'}/login`);
+      window.location.assign(`${getStudentPortalUrl()}/login`);
     }
   }, [hasHydrated, isAuthenticated, user?.role, router]);
 

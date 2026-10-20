@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store';
 import { authApi } from '@/lib/api';
 import { useTheme } from '@/components/providers/ThemeProvider';
+import { getFacultyPortalUrl, getStudentPortalUrl } from '@/lib/utils';
 import {
   Moon,
   Sun,
@@ -52,10 +53,10 @@ export function Navbar({ appMode = 'student' }: NavbarProps) {
 
   const targetPortalUrl =
     appMode === 'student'
-      ? process.env.NEXT_PUBLIC_FACULTY_URL || 'http://localhost:3001'
-      : process.env.NEXT_PUBLIC_STUDENT_URL || 'http://localhost:3000';
+      ? getFacultyPortalUrl()
+      : getStudentPortalUrl();
 
-  const targetPortalLabel = appMode === 'student' ? 'Faculty Portal (:3001)' : 'Student Portal (:3000)';
+  const targetPortalLabel = appMode === 'student' ? 'Faculty Portal' : 'Student Portal';
 
   const handleQuickSwitch = (targetRole: 'student' | 'faculty') => {
     if (targetRole === 'student') {

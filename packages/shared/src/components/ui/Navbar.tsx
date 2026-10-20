@@ -7,6 +7,7 @@ import { useAuthStore } from '@/store';
 import { useToast } from '@/components/providers/ToastProvider';
 import { authApi } from '@/lib/api';
 import { useTheme } from '@/components/providers/ThemeProvider';
+import { getFacultyPortalUrl, getStudentPortalUrl } from '@/lib/utils';
 import {
   Moon,
   Sun,
@@ -63,8 +64,8 @@ export function Navbar({ appMode = 'student' }: NavbarProps) {
   };
 
   const otherPortalUrl = appMode === 'student'
-    ? (process.env.NEXT_PUBLIC_FACULTY_URL || 'http://localhost:3001')
-    : (process.env.NEXT_PUBLIC_STUDENT_URL || 'http://localhost:3000');
+    ? getFacultyPortalUrl()
+    : getStudentPortalUrl();
   const otherPortalName = appMode === 'student' ? 'Faculty portal' : 'Student portal';
   const showSignInLink = pathname !== '/login';
   const isLoggedIn = mounted && isAuthenticated;
