@@ -375,16 +375,11 @@ class VoiceEngine {
     };
 
     const sorted = [...candidates].sort((a, b) => scoreVoice(b) - scoreVoice(a));
-    const best = sorted[0];
-    if (best && scoreVoice(best) > 0) {
-      return best;
-    }
-    return null;
+    return sorted[0] || candidates[0] || voices[0] || null;
   }
 
   /**
    * Fallback Tier 5: Browser Web Speech API with natural voice selection.
-   * If only robotic voices are installed, cleanly skips speech rather than degrading audio.
    */
   private fallbackWebSpeech(
     text: string,
@@ -402,14 +397,10 @@ class VoiceEngine {
     try {
       this.synth.cancel();
       const voice = this.pickBestWebSpeechVoice();
-      if (!voice) {
-        console.warn('No natural speech synthesis voice installed; suppressing robotic voice output.');
-        callbacks?.onEnd?.();
-        return;
-      }
-
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.voice = voice;
+      if (voice) {
+        utterance.voice = voice;
+      }
       utterance.rate = 0.98;
       utterance.pitch = 1.0;
 

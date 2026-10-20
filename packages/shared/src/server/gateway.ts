@@ -1,5 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+function getUpstreamBaseUrl(): string {
+  const isProd = Boolean(process.env.VERCEL || process.env.NODE_ENV === 'production');
+  const configured =
+    process.env.API_INTERNAL_URL ||
+    process.env.API_URL ||
+    process.env.NEXT_PUBLIC_API_URL;
+
+  if (configured) {
+    if (isProd && (configured.includes('localhost') || configured.includes('127.0.0.1'))) {
+      return 'https://vivaai-848e.onrender.com';
+    }
+    return configured;
+  }
+  return isProd ? 'https://vivaai-848e.onrender.com' : 'http://127.0.0.1:8000';
+}
+
 /** Same-origin API boundary: browser JavaScript never receives authentication tokens. */
 export async function gateway(req: NextRequest, context: { params: Promise<{ path: string[] }> }, portal: 'student' | 'faculty' = 'student') {
   const { path } = await context.params;
@@ -35,7 +51,7 @@ export async function gateway(req: NextRequest, context: { params: Promise<{ pat
   if (Number(req.headers.get('content-length') || 0) > 52 * 1024 * 1024) {
     return NextResponse.json({ detail: 'Request too large' }, { status: 413 });
   }
-  const base = process.env.API_INTERNAL_URL || process.env.API_URL || 'http://127.0.0.1:8000';
+  const base = getUpstreamBaseUrl();
   const upstream = new URL(`/api/v1/${path.map(encodeURIComponent).join('/')}${req.nextUrl.search}`, base);
   const headers = new Headers();
   for (const name of ['content-type', 'accept', 'range']) {
@@ -64,8 +80,11 @@ export async function gateway(req: NextRequest, context: { params: Promise<{ pat
       if (json && typeof json === 'object') {
         delete json.access_token;
         delete json.token_type;
-        if (json.ticket && !json.ws_url && process.env.NEXT_PUBLIC_WS_URL) {
-          json.ws_url = process.env.NEXT_PUBLIC_WS_URL;
+        if (json.ticket) {
+          const isProd = Boolean(process.env.VERCEL || process.env.NODE_ENV === 'production');
+          if (!json.ws_url || (isProd && (json.ws_url.includes('localhost') || json.ws_url.includes('127.0.0.1')))) {
+            json.ws_url = isProd ? 'wss://vivaai-848e.onrender.com' : (process.env.NEXT_PUBLIC_WS_URL || 'ws://127.0.0.1:8000');
+          }
         }
       }
       body = JSON.stringify(json);

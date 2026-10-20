@@ -870,12 +870,16 @@ export default function LiveInterviewPage() {
 
         if (isCancelled) return;
 
-        let baseWs = ticketResponse.data?.ws_url || process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
+        const isLocalHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
+        let baseWs = ticketResponse.data?.ws_url || process.env.NEXT_PUBLIC_WS_URL || (isLocalHost ? 'ws://127.0.0.1:8000' : 'wss://vivaai-848e.onrender.com');
         // Local development must use the local API, even if a previous public tunnel remains configured.
-        if (['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+        if (isLocalHost) {
           baseWs = 'ws://127.0.0.1:8000';
-        } else if (typeof window !== 'undefined' && (window.location.protocol === 'https:' || baseWs.includes('trycloudflare.com'))) {
+        } else {
           baseWs = baseWs.replace(/^ws:\/\//, 'wss://').replace(/^http:\/\//, 'wss://').replace(/^https:\/\//, 'wss://');
+          if (baseWs.includes('localhost') || baseWs.includes('127.0.0.1')) {
+            baseWs = 'wss://vivaai-848e.onrender.com';
+          }
         }
         const wsUrl = `${baseWs}/ws/interview/${sessionId}?ticket=${encodeURIComponent(ticketResponse.data.ticket)}&voice=${encodeURIComponent(selectedVoiceRef.current)}`;
         ws = new WebSocket(wsUrl);
