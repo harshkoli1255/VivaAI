@@ -5,7 +5,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import select
+from sqlalchemy import select, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import (
@@ -49,19 +49,21 @@ async def login(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
-    """Authenticate user, set HttpOnly session cookie, and return JWT."""
-    await check_auth_rate(db, req.student_id or req.email or "missing-identifier")
-    if req.student_id:
-        req.student_id = req.student_id.strip()
-        result = await db.execute(
-            select(User).where(User.student_id == req.student_id)
-        )
-    elif req.email:
-        result = await db.execute(
-            select(User).where(User.email == req.email)
-        )
-    else:
+    ident = (req.student_id or req.email or "").strip()
+    if not ident:
         raise HTTPException(status_code=400, detail="Provide student_id or email")
+
+    await check_auth_rate(db, ident)
+    result = await db.execute(
+        select(User).where(
+            or_(
+                func.lower(User.student_id) == ident.lower(),
+                func.lower(User.email) == ident.lower(),
+                func.lower(User.email) == f"{ident.lower()}@university.edu",
+                func.concat(func.lower(User.email), "@university.edu") == ident.lower(),
+            )
+        )
+    )
 
     user = result.scalar_one_or_none()
     if not user or not verify_password(req.password, user.hashed_password):

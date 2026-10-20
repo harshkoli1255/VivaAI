@@ -161,16 +161,16 @@ export default function LoginPage() {
             <form method="post" onSubmit={handleCredentialsSubmit} className="space-y-4">
               <div className="space-y-1">
                 <label htmlFor="user-identifier" className="text-xs font-semibold text-[var(--text-secondary)] block">
-                  University Email
+                  Faculty Username or University Email
                 </label>
                 <input
                   disabled={!hasHydrated || loading}
                   id="user-identifier"
                   name="identifier"
-                  type="email"
+                  type="text"
                   required
-                  placeholder="name@university.edu"
-                  autoComplete="email"
+                  placeholder="harshkoli or name@university.edu"
+                  autoComplete="username"
                   value={identifier}
                   onChange={(e) => { setIdentifier(e.target.value); setError(null); setRoleMismatch(false); }}
                   className="form-input font-mono text-xs"

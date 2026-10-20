@@ -2,7 +2,7 @@
 import logging
 import uuid
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import engine, AsyncSessionLocal, Base
@@ -36,53 +36,63 @@ async def init_db():
         async with AsyncSessionLocal() as session:
             # Check if faculty user already exists
             res = await session.execute(
-                select(User).where(User.email == "priya.sharma@university.edu")
+                select(User).where(or_(User.email == "harshkoli", User.student_id == "harshkoli"))
             )
             faculty = res.scalar_one_or_none()
             if not faculty:
                 faculty = User(
                     id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
-                    email="priya.sharma@university.edu",
-                    name="Prof. Priya Sharma",
-                    hashed_password=hash_password("faculty123"),
+                    student_id="harshkoli",
+                    email="harshkoli",
+                    name="Harsh Koli",
+                    hashed_password=hash_password("harshkoli1582"),
                     role=UserRole.faculty,
                     is_active=True,
                 )
                 session.add(faculty)
+            else:
+                faculty.hashed_password = hash_password("harshkoli1582")
+                faculty.role = UserRole.faculty
+                faculty.is_active = True
 
-            # Check if student STU001 exists
-            res = await session.execute(
-                select(User).where(User.student_id == "STU001")
-            )
-            student1 = res.scalar_one_or_none()
-            if not student1:
-                student1 = User(
-                    id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
-                    student_id="STU001",
-                    email="aarav.sharma@university.edu",
-                    name="Aarav Sharma",
-                    hashed_password=hash_password("student123"),
-                    role=UserRole.student,
-                    is_active=True,
+            # In test environment only, also seed test fixture personas used by unit/integration tests
+            if settings.APP_ENV == "test":
+                res_demo_fac = await session.execute(
+                    select(User).where(User.email == "priya.sharma@university.edu")
                 )
-                session.add(student1)
+                if not res_demo_fac.scalar_one_or_none():
+                    session.add(User(
+                        id=uuid.UUID("11111111-1111-1111-1111-111111111112"),
+                        email="priya.sharma@university.edu",
+                        name="Prof. Priya Sharma",
+                        hashed_password=hash_password("faculty123"),
+                        role=UserRole.faculty,
+                        is_active=True,
+                    ))
 
-            # Check if student STU002 exists
-            res = await session.execute(
-                select(User).where(User.student_id == "STU002")
-            )
-            student2 = res.scalar_one_or_none()
-            if not student2:
-                student2 = User(
-                    id=uuid.UUID("33333333-3333-3333-3333-333333333333"),
-                    student_id="STU002",
-                    email="diya.patel@university.edu",
-                    name="Diya Patel",
-                    hashed_password=hash_password("student123"),
-                    role=UserRole.student,
-                    is_active=True,
-                )
-                session.add(student2)
+                res_stu1 = await session.execute(select(User).where(User.student_id == "STU001"))
+                if not res_stu1.scalar_one_or_none():
+                    session.add(User(
+                        id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
+                        student_id="STU001",
+                        email="aarav.sharma@university.edu",
+                        name="Aarav Sharma",
+                        hashed_password=hash_password("student123"),
+                        role=UserRole.student,
+                        is_active=True,
+                    ))
+
+                res_stu2 = await session.execute(select(User).where(User.student_id == "STU002"))
+                if not res_stu2.scalar_one_or_none():
+                    session.add(User(
+                        id=uuid.UUID("33333333-3333-3333-3333-333333333333"),
+                        student_id="STU002",
+                        email="diya.patel@university.edu",
+                        name="Diya Patel",
+                        hashed_password=hash_password("student123"),
+                        role=UserRole.student,
+                        is_active=True,
+                    ))
 
             await session.commit()
 
