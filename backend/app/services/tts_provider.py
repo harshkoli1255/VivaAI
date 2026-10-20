@@ -299,7 +299,7 @@ class MockTTSProvider(TTSProvider):
 
 
 def get_tts_provider(voice_id: Optional[str] = None) -> TTSProvider:
-    if settings.MOCK_MODE:
+    if settings.MOCK_MODE and not settings.IS_PRODUCTION:
         return MockTTSProvider()
     provider = settings.TTS_PROVIDER.lower()
 

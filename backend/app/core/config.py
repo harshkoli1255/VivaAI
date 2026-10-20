@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     # Separate frontend origins for student and faculty apps, including Cloudflare tunnels
     CORS_ORIGINS: str = (
         "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001,"
+        "https://viva-ai-delta.vercel.app,https://viva-ai-8asv.vercel.app,"
         "https://beads-cornell-resistant-patches.trycloudflare.com,"
         "https://shield-developed-fioricet-mixture.trycloudflare.com,"
         "https://flex-cashiers-conclusion-ask.trycloudflare.com"
@@ -95,8 +96,9 @@ class Settings(BaseSettings):
                     "secure string of at least 32 characters and cannot be a default value."
                 )
 
-            # Never permit demo mode in production
+            # Never permit demo or mock mode in production
             self.DEMO_MODE = False
+            self.MOCK_MODE = False
 
             # Cookies must be secure in production
             self.COOKIE_SECURE = True

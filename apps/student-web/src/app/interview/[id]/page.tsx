@@ -935,7 +935,23 @@ export default function LiveInterviewPage() {
                 try { sessionStorage.removeItem(`vivaai_pending_${sessionId}`); } catch {}
               }
             } else if (data.type === 'session_restored') {
-              setHistory(data.turns);
+              const turns = data.turns || [];
+              setHistory(turns);
+              const aiTurns = turns.filter((t: any) => t.speaker === 'ai');
+              const lastAiTurn = aiTurns[aiTurns.length - 1];
+              if (lastAiTurn?.text) {
+                setCurrentPromptText(lastAiTurn.text);
+              }
+              if (aiTurns.length > 0) {
+                setFallbackTurnIndex(Math.max(0, aiTurns.length - 1));
+              }
+              const lastTurn = turns[turns.length - 1];
+              if (lastTurn?.speaker === 'ai') {
+                setActiveSpeaker('ai');
+              } else if (lastTurn?.speaker === 'student') {
+                setActiveSpeaker('student');
+                setOrbState('idle');
+              }
             } else if (data.type === 'answer_saved_previous_question') {
               setOrbState('idle'); setActiveSpeaker('student');
               showToast(data.message, 'info');
@@ -1546,7 +1562,7 @@ export default function LiveInterviewPage() {
             </div>
 
             <div className="flex items-center gap-1.5">
-              {(activeSpeaker === 'ai' || (voiceEngine && voiceEngine.isSpeaking())) ? (
+              {voiceEngine && voiceEngine.isSpeaking() ? (
                 <>
                   <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20">
                     <ShieldCheck className="w-3 h-3" />
@@ -1566,6 +1582,7 @@ export default function LiveInterviewPage() {
                 <button
                   type="button"
                   onClick={() => {
+                    voiceEngine?.unlockAudio();
                     if (currentPromptText) {
                       speakQuestion(currentPromptText, false);
                     } else {
@@ -1573,7 +1590,7 @@ export default function LiveInterviewPage() {
                     }
                   }}
                   className="px-2.5 py-1 rounded-lg text-xs font-medium text-[var(--primary)] hover:bg-[var(--primary)]/10 border border-transparent hover:border-[var(--primary)]/20 transition-all flex items-center gap-1.5 cursor-pointer"
-                  title="Repeat question audio aloud"
+                  title="Play or repeat question audio aloud"
                 >
                   <Volume1 className="w-3.5 h-3.5" />
                   <span>Repeat Audio</span>

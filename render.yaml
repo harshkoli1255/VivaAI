@@ -41,5 +41,7 @@ services:
         value: qwen/qwen3.8-27b
       - key: LLM_STRONG_MODEL
         value: qwen/qwen3.8-27b
+      - key: MOCK_MODE
+        value: "false"
       - key: CORS_ORIGINS
-        value: "https://localhost:3000,https://localhost:3001"
+        value: "https://viva-ai-delta.vercel.app,https://viva-ai-8asv.vercel.app,http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001"
