@@ -21,6 +21,7 @@ export async function gateway(req: NextRequest, context: { params: Promise<{ pat
           allowedHosts.has(originUrl.host) ||
           allowedHosts.has(originUrl.hostname) ||
           originUrl.hostname.endsWith('.trycloudflare.com') ||
+          originUrl.hostname.endsWith('.vercel.app') ||
           originUrl.hostname === 'localhost' ||
           originUrl.hostname === '127.0.0.1';
         if (!isAllowed) {
