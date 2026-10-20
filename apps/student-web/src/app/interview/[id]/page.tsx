@@ -872,13 +872,17 @@ export default function LiveInterviewPage() {
 
         const isLocalHost = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
         let baseWs = ticketResponse.data?.ws_url || process.env.NEXT_PUBLIC_WS_URL || (isLocalHost ? 'ws://127.0.0.1:8000' : 'wss://vivaai-848e.onrender.com');
-        // Local development must use the local API, even if a previous public tunnel remains configured.
         if (isLocalHost) {
           baseWs = 'ws://127.0.0.1:8000';
         } else {
           baseWs = baseWs.replace(/^ws:\/\//, 'wss://').replace(/^http:\/\//, 'wss://').replace(/^https:\/\//, 'wss://');
-          if (baseWs.includes('localhost') || baseWs.includes('127.0.0.1')) {
-            baseWs = 'wss://vivaai-848e.onrender.com';
+          if (baseWs.includes('localhost') || baseWs.includes('127.0.0.1') || baseWs.includes('trycloudflare.com')) {
+            const configuredWs = process.env.NEXT_PUBLIC_WS_URL;
+            if (configuredWs && !configuredWs.includes('trycloudflare.com') && !configuredWs.includes('localhost')) {
+              baseWs = configuredWs.replace(/^ws:\/\//, 'wss://').replace(/^http:\/\//, 'wss://').replace(/^https:\/\//, 'wss://');
+            } else {
+              baseWs = 'wss://vivaai-848e.onrender.com';
+            }
           }
         }
         const wsUrl = `${baseWs}/ws/interview/${sessionId}?ticket=${encodeURIComponent(ticketResponse.data.ticket)}&voice=${encodeURIComponent(selectedVoiceRef.current)}`;

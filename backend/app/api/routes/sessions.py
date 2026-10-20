@@ -233,7 +233,7 @@ async def generate_ws_ticket(
     ticket = create_ws_ticket(session_id, current["sub"], current.get("role", "student"), current.get("jti"))
 
     ws_url = os.getenv("NEXT_PUBLIC_WS_URL") or getattr(settings, "NEXT_PUBLIC_WS_URL", None) or os.getenv("WS_URL")
-    if not ws_url:
+    if not ws_url or (settings.IS_PRODUCTION and "trycloudflare" in ws_url):
         host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "localhost:8000"
         proto = "wss" if (request.headers.get("x-forwarded-proto") == "https" or "trycloudflare" in host) else "ws"
         ws_url = f"{proto}://{host}"

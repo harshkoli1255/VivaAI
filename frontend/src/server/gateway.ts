@@ -8,7 +8,7 @@ function getUpstreamBaseUrl(): string {
     process.env.NEXT_PUBLIC_API_URL;
 
   if (configured) {
-    if (isProd && (configured.includes('localhost') || configured.includes('127.0.0.1'))) {
+    if (isProd && (configured.includes('localhost') || configured.includes('127.0.0.1') || configured.includes('trycloudflare.com'))) {
       return 'https://vivaai-848e.onrender.com';
     }
     return configured;
@@ -82,8 +82,19 @@ export async function gateway(req: NextRequest, context: { params: Promise<{ pat
         delete json.token_type;
         if (json.ticket) {
           const isProd = Boolean(process.env.VERCEL || process.env.NODE_ENV === 'production');
-          if (!json.ws_url || (isProd && (json.ws_url.includes('localhost') || json.ws_url.includes('127.0.0.1')))) {
-            json.ws_url = isProd ? 'wss://vivaai-848e.onrender.com' : (process.env.NEXT_PUBLIC_WS_URL || 'ws://127.0.0.1:8000');
+          const isInvalidWs = !json.ws_url || (isProd && (
+            json.ws_url.includes('localhost') ||
+            json.ws_url.includes('127.0.0.1') ||
+            json.ws_url.includes('trycloudflare.com')
+          ));
+          if (isInvalidWs) {
+            const configuredWs = process.env.NEXT_PUBLIC_WS_URL;
+            if (configuredWs && !configuredWs.includes('trycloudflare.com') && !configuredWs.includes('localhost')) {
+              json.ws_url = configuredWs;
+            } else {
+              const upstreamBase = getUpstreamBaseUrl();
+              json.ws_url = upstreamBase.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://');
+            }
           }
         }
       }
