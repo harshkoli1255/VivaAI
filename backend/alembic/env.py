@@ -20,12 +20,9 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-# Override DB URL from environment
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
-if DATABASE_URL:
-    # Alembic needs sync driver for migrations
-    sync_url = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
-    config.set_main_option("sqlalchemy.url", sync_url)
+# Keep the async driver; migrations run through an async connection below.
+from app.core.config import settings
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"))
 
 
 def run_migrations_offline() -> None:
@@ -47,13 +44,12 @@ def do_run_migrations(connection: Connection) -> None:
 
 
 async def run_async_migrations() -> None:
-    # Use sync engine for migrations
-    sync_url = config.get_main_option("sqlalchemy.url")
-    from sqlalchemy import create_engine
-    connectable = create_engine(sync_url, poolclass=pool.NullPool)
-    with connectable.connect() as connection:
-        do_run_migrations(connection)
-    connectable.dispose()
+    connectable = async_engine_from_config(
+        config.get_section(config.config_ini_section), prefix="sqlalchemy.", poolclass=pool.NullPool,
+    )
+    async with connectable.connect() as connection:
+        await connection.run_sync(do_run_migrations)
+    await connectable.dispose()
 
 
 def run_migrations_online() -> None:

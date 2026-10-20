@@ -1,0 +1,45 @@
+services:
+  # ── VivaAI FastAPI Backend & Duplex WebSocket Service ─────────
+  - type: web
+    name: vivaai-backend
+    runtime: python
+    region: singapore # Matches your Neon DB region (ap-southeast-1) for ultra-low latency
+    plan: free
+    rootDir: backend
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: APP_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false # Set in Render Dashboard from Neon DB
+      - key: DB_FALLBACK_SQLITE_DEV
+        value: "false"
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: DEEPGRAM_STT_MODEL
+        value: nova-2
+      - key: TTS_PROVIDER
+        value: elevenlabs
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: ELEVENLABS_VOICE_ID
+        value: Xb7hH8MSUJpSbSDYk0k2
+      - key: LLM_PROVIDER
+        value: openai
+      - key: OPENAI_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: LLM_FAST_MODEL
+        value: qwen/qwen3.8-27b
+      - key: LLM_STRONG_MODEL
+        value: qwen/qwen3.8-27b
+      - key: CORS_ORIGINS
+        value: "https://localhost:3000,https://localhost:3001"

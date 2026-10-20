@@ -58,7 +58,7 @@ services:
       /bin/sh -c "
         mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-vivaai_minio} ${MINIO_ROOT_PASSWORD:-vivaai_minio_pass};
         mc mb --ignore-existing local/${MINIO_BUCKET:-vivaai-audio};
-        mc anonymous set download local/${MINIO_BUCKET:-vivaai-audio};
+        mc anonymous set none local/${MINIO_BUCKET:-vivaai-audio};
         exit 0;
       "
 
@@ -124,26 +124,41 @@ services:
       - ./backend:/app
     command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
 
-  # ── Next.js frontend ──────────────────────────────────────
-  frontend:
+  # ── Student Web Portal (Port 3000) ────────────────────────
+  student-web:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: apps/student-web/Dockerfile
     restart: unless-stopped
     depends_on:
       - backend
     env_file: .env
     environment:
+      API_INTERNAL_URL: http://backend:8000
       NEXT_PUBLIC_API_URL: http://localhost:8000
       NEXT_PUBLIC_WS_URL: ws://localhost:8000
-      NEXT_PUBLIC_LIVEKIT_URL: ws://localhost:7880
+      NEXT_PUBLIC_FACULTY_URL: http://localhost:3001
       NEXT_PUBLIC_MOCK_MODE: ${MOCK_MODE:-true}
     ports:
       - "3000:3000"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
+
+  # ── Faculty Assessment Portal (Port 3001) ─────────────────
+  faculty-web:
+    build:
+      context: .
+      dockerfile: apps/faculty-web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    env_file: .env
+    environment:
+      API_INTERNAL_URL: http://backend:8000
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_WS_URL: ws://localhost:8000
+      NEXT_PUBLIC_STUDENT_URL: http://localhost:3000
+      NEXT_PUBLIC_MOCK_MODE: ${MOCK_MODE:-true}
+    ports:
+      - "3001:3001"
 
 volumes:
   postgres_data:

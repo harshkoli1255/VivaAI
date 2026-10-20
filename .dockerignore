@@ -1,0 +1,16 @@
+.git
+**/node_modules
+**/.next
+**/.env
+**/.env.*
+!**/.env.example
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/*.pyc
+**/*.db
+**/*.sqlite*
+**/*.tsbuildinfo
+backend/data
+**/*.log
+.DS_Store

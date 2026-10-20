@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, ChevronUp, Subtitles, Volume2, Mic, Eye, EyeOff } from 'lucide-react';
-import { formatTime } from '@/lib/utils';
+import { ChevronDown, ChevronUp, Subtitles, Volume2, Mic } from 'lucide-react';
+import { Badge } from '@/components/ui/Badge';
 
 interface TranscriptItem {
   speaker: 'ai' | 'student';
@@ -21,82 +21,89 @@ export function LiveCaptions({
   activeSpeaker = 'ai',
   recentHistory = [],
 }: LiveCaptionsProps) {
-  const [showSubtitles, setShowSubtitles] = useState<boolean>(false);
+  const [showSubtitles, setShowSubtitles] = useState<boolean>(true);
   const [showHistory, setShowHistory] = useState<boolean>(false);
 
   return (
-    <div className="w-full max-w-2xl mx-auto space-y-2 select-none">
-      {/* Subtitles & Audio Status Bar */}
-      <div className="flex items-center justify-between px-2 text-xs text-slate-400">
-        <div className="flex items-center gap-2 font-mono text-[11px]">
+    <div className="w-full max-w-2xl mx-auto space-y-2.5">
+      {/* Subtitles & Status Bar */}
+      <div className="flex items-center justify-between px-1 text-xs">
+        <div className="flex items-center gap-2">
           <span
-            className={`w-2 h-2 rounded-full ${
-              activeSpeaker === 'ai' ? 'bg-sky-400 animate-pulse' : 'bg-emerald-400 animate-pulse'
+            className={`w-2 h-2 rounded-full shrink-0 ${
+              activeSpeaker === 'ai'
+                ? 'bg-blue-600 dark:bg-blue-400 animate-pulse'
+                : 'bg-emerald-600 dark:bg-emerald-400 animate-pulse'
             }`}
           />
-          <span className="font-semibold text-slate-300">
-            {activeSpeaker === 'ai' ? 'Examiner Voice Active (Listen)' : 'Candidate Voice Active'}
+          <span className="font-medium text-[var(--text-secondary)] text-xs">
+            {activeSpeaker === 'ai' ? 'Examiner audio channel active' : 'Candidate speech capturing'}
           </span>
         </div>
 
         <div className="flex items-center gap-3">
           <button
+            type="button"
             onClick={() => setShowSubtitles(!showSubtitles)}
-            className="flex items-center gap-1.5 text-[11px] font-mono hover:text-white transition-colors"
-            title="Toggle optional text subtitles"
+            className="flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+            title="Toggle closed captions display"
           >
-            <Subtitles className={`w-3.5 h-3.5 ${showSubtitles ? 'text-sky-400' : 'text-slate-500'}`} />
-            <span>Subtitles: {showSubtitles ? 'On' : 'Off'}</span>
+            <Subtitles className={`w-3.5 h-3.5 ${showSubtitles ? 'text-blue-600 dark:text-blue-400' : ''}`} />
+            <span>Captions: {showSubtitles ? 'On' : 'Off'}</span>
           </button>
 
           {recentHistory.length > 0 && (
             <button
+              type="button"
               onClick={() => setShowHistory(!showHistory)}
-              className="flex items-center gap-1 text-[11px] font-mono hover:text-white transition-colors text-slate-400"
+              className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
             >
-              <span>{recentHistory.length} Turns</span>
-              {showHistory ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              <span>{recentHistory.length} Recorded Turns</span>
+              {showHistory ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
           )}
         </div>
       </div>
 
-      {/* Optional Subtitles / Closed Captions Display */}
+      {/* Closed Captions Box */}
       {showSubtitles && (
-        <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 backdrop-blur-md shadow-lg transition-all animate-fade-in">
-          <div className="text-[10px] font-mono text-slate-500 uppercase tracking-wider mb-1 flex items-center justify-between">
-            <span>{activeSpeaker === 'ai' ? 'Examiner Spoken Audio Subtitle' : 'Candidate Audio Subtitle'}</span>
-            <span className="text-[9px] text-sky-400 font-mono">CC Active</span>
+        <div className="p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-default)] shadow-sm space-y-1.5">
+          <div className="flex items-center justify-between text-[11px] text-[var(--text-muted)] border-b border-[var(--border-subtle)] pb-1.5">
+            <span className="font-semibold uppercase tracking-wider">
+              {activeSpeaker === 'ai' ? 'Examiner Spoken Prompt' : 'Candidate Audio Transcript'}
+            </span>
+            <Badge variant="neutral">Live Caption</Badge>
           </div>
-          <p className="text-xs sm:text-sm text-slate-200 leading-relaxed font-mono">
-            {currentText || '...'}
+          <p className="text-sm text-[var(--text-primary)] leading-relaxed font-normal min-h-[1.5rem]">
+            {currentText || 'Listening for speech input...'}
           </p>
         </div>
       )}
 
-      {/* Verbatim History Drawer */}
+      {/* Verbatim Turn History Drawer */}
       {showHistory && recentHistory.length > 0 && (
-        <div className="glass-panel p-4 max-h-56 overflow-y-auto space-y-2 border border-slate-800">
-          <div className="text-[10px] font-mono text-slate-500 uppercase tracking-wider pb-1 border-b border-slate-800">
-            Transcript Ledger ({recentHistory.length} Recorded Oral Turns):
+        <div className="p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-default)] shadow-sm max-h-56 overflow-y-auto space-y-2.5">
+          <div className="text-xs font-semibold text-[var(--text-muted)] pb-1 border-b border-[var(--border-subtle)] flex items-center justify-between">
+            <span>Official Examination Turn Ledger:</span>
+            <span className="font-mono">{recentHistory.length} Turns</span>
           </div>
           {recentHistory.map((item, idx) => (
             <div
               key={idx}
-              className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800/80 space-y-0.5 text-xs font-mono"
+              className="p-3 rounded-md bg-[var(--bg-muted)] border border-[var(--border-subtle)] space-y-1 text-xs"
             >
-              <div className="flex items-center justify-between text-[10px]">
-                <span className={`font-bold flex items-center gap-1 ${
-                  item.speaker === 'ai' ? 'text-sky-400' : 'text-emerald-400'
+              <div className="flex items-center justify-between">
+                <span className={`font-semibold flex items-center gap-1.5 ${
+                  item.speaker === 'ai' ? 'text-blue-700 dark:text-blue-400' : 'text-emerald-700 dark:text-emerald-400'
                 }`}>
-                  {item.speaker === 'ai' ? <Volume2 className="w-3 h-3" /> : <Mic className="w-3 h-3" />}
+                  {item.speaker === 'ai' ? <Volume2 className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
                   {item.speaker === 'ai' ? 'Examiner' : 'Candidate'} [Turn #{idx + 1}]
                 </span>
-                <span className="text-slate-500 text-[10px]">
+                <span className="text-[10px] font-mono text-[var(--text-muted)]">
                   {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                 </span>
               </div>
-              <p className="text-slate-300 leading-relaxed text-[11px] pl-4">
+              <p className="text-[var(--text-secondary)] leading-relaxed text-xs pl-5">
                 {item.text}
               </p>
             </div>

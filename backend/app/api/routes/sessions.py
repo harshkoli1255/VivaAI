@@ -1,21 +1,31 @@
-"""Viva session management endpoints."""
-import uuid
+"""Viva session management endpoints with strict object authorization."""
+import asyncio
 from datetime import datetime, timezone
+import logging
 from typing import List, Optional
+import os
+import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request
+from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from app.core.security import get_current_user, require_faculty
+from app.core.config import settings
+from app.core.security import (
+    create_ws_ticket, get_current_user, require_faculty,
+)
 from app.db.session import get_db
 from app.models.models import (
-    VivaSession, VivaConfig, User, SessionStatus,
-    VivaPhase, ReviewStatus, AuditLog,
+    AuditLog, ReviewStatus, SessionStatus, User, VivaConfig,
+    VivaPhase, VivaSession,
 )
+from app.services.storage import get_audio_storage
+from app.services.scoring_jobs import enqueue_scoring
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -41,8 +51,15 @@ class SessionResponse(BaseModel):
 
 
 class OverrideRequest(BaseModel):
-    override_score: float
-    reason: str
+    override_score: float = Field(..., ge=0.0, le=100.0, description="Override score between 0 and 100")
+    reason: str = Field(..., min_length=5, max_length=1000, description="Mandatory academic justification")
+
+
+class WsTicketResponse(BaseModel):
+    ticket: str
+    session_id: str
+    expires_in: int
+    ws_url: Optional[str] = None
 
 
 @router.post("", response_model=SessionResponse)
@@ -52,18 +69,29 @@ async def create_session(
     db: AsyncSession = Depends(get_db),
     current: dict = Depends(get_current_user),
 ):
-    # Validate config exists
+    """Schedule or initialize a viva session for current candidate."""
+    try:
+        config_uuid = uuid.UUID(req.viva_config_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid viva config ID")
+
     config_result = await db.execute(
-        select(VivaConfig).where(VivaConfig.id == uuid.UUID(req.viva_config_id))
+        select(VivaConfig).where(VivaConfig.id == config_uuid)
     )
     config = config_result.scalar_one_or_none()
     if not config:
-        raise HTTPException(404, "Viva config not found")
+        raise HTTPException(status_code=404, detail="Viva configuration not found")
 
+    if not config.is_active:
+        raise HTTPException(status_code=409, detail="This examination is no longer available")
+    if current.get("role") != "student":
+        raise HTTPException(status_code=403, detail="Only candidates can create examination sessions")
+
+    student_uuid = uuid.UUID(current["sub"])
     session = VivaSession(
         id=uuid.uuid4(),
-        viva_config_id=uuid.UUID(req.viva_config_id),
-        student_id=uuid.UUID(current["sub"]),
+        viva_config_id=config_uuid,
+        student_id=student_uuid,
         status=SessionStatus.scheduled,
         current_phase=VivaPhase.warm_up,
         consent_given=req.consent_given,
@@ -92,19 +120,30 @@ async def my_sessions(
     db: AsyncSession = Depends(get_db),
     current: dict = Depends(get_current_user),
 ):
+    """Retrieve all sessions belonging to the authenticated student candidate."""
+    try:
+        student_uuid = uuid.UUID(current["sub"])
+    except ValueError:
+        return []
+
     result = await db.execute(
         select(VivaSession)
-        .where(VivaSession.student_id == uuid.UUID(current["sub"]))
+        .where(VivaSession.student_id == student_uuid)
         .order_by(VivaSession.created_at.desc())
     )
     sessions = result.scalars().all()
     return [
         SessionResponse(
-            id=str(s.id), viva_config_id=str(s.viva_config_id),
-            student_id=str(s.student_id), status=s.status.value,
-            current_phase=s.current_phase.value, elapsed_secs=s.elapsed_secs,
-            consent_given=s.consent_given, started_at=s.started_at,
-            ended_at=s.ended_at, total_score=s.total_score,
+            id=str(s.id),
+            viva_config_id=str(s.viva_config_id),
+            student_id=str(s.student_id),
+            status=s.status.value,
+            current_phase=s.current_phase.value,
+            elapsed_secs=s.elapsed_secs,
+            consent_given=s.consent_given,
+            started_at=s.started_at,
+            ended_at=s.ended_at,
+            total_score=s.total_score,
             review_status=s.review_status.value,
         )
         for s in sessions
@@ -117,18 +156,27 @@ async def get_session(
     db: AsyncSession = Depends(get_db),
     current: dict = Depends(get_current_user),
 ):
+    """Retrieve single session with object-level authorization."""
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session UUID")
+
     result = await db.execute(
         select(VivaSession)
         .options(selectinload(VivaSession.viva_config))
-        .where(VivaSession.id == uuid.UUID(session_id))
+        .where(VivaSession.id == session_uuid)
     )
     session = result.scalar_one_or_none()
     if not session:
-        raise HTTPException(404, "Session not found")
+        raise HTTPException(status_code=404, detail="Session not found")
 
-    # Students can only see their own
-    if current["role"] == "student" and str(session.student_id) != current["sub"]:
-        raise HTTPException(403)
+    # Object-level check: students can only see their own sessions
+    if current.get("role") == "student" and str(session.student_id) != current["sub"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Candidates may only access their own examination sessions",
+        )
 
     return {
         "id": str(session.id),
@@ -144,8 +192,10 @@ async def get_session(
         "score_breakdown": session.score_breakdown,
         "review_status": session.review_status.value,
         "override_score": session.override_score,
+        "override_reason": session.override_reason,
         "tab_switch_count": session.tab_switch_count,
         "long_silence_count": session.long_silence_count,
+        "proctoring_events": session.proctoring_events or [],
         "viva_config": {
             "title": session.viva_config.title if session.viva_config else "",
             "subject": session.viva_config.subject if session.viva_config else "",
@@ -155,23 +205,74 @@ async def get_session(
     }
 
 
+@router.post("/{session_id}/ws-ticket", response_model=WsTicketResponse)
+async def generate_ws_ticket(
+    session_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current: dict = Depends(get_current_user),
+):
+    """Generate a single-use 60s ticket for WebSocket authentication."""
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session UUID")
+
+    result = await db.execute(select(VivaSession).where(VivaSession.id == session_uuid))
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Students can only request ticket for their own session
+    if current.get("role") == "student" and str(session.student_id) != current["sub"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot obtain ticket for another candidate's session",
+        )
+
+    ticket = create_ws_ticket(session_id, current["sub"], current.get("role", "student"), current.get("jti"))
+
+    ws_url = os.getenv("NEXT_PUBLIC_WS_URL") or getattr(settings, "NEXT_PUBLIC_WS_URL", None) or os.getenv("WS_URL")
+    if not ws_url:
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "localhost:8000"
+        proto = "wss" if (request.headers.get("x-forwarded-proto") == "https" or "trycloudflare" in host) else "ws"
+        ws_url = f"{proto}://{host}"
+
+    return WsTicketResponse(
+        ticket=ticket,
+        session_id=session_id,
+        expires_in=settings.WS_TICKET_EXPIRE_SECONDS,
+        ws_url=ws_url,
+    )
+
+
 @router.post("/{session_id}/start")
 async def start_session(
     session_id: str,
     db: AsyncSession = Depends(get_db),
     current: dict = Depends(get_current_user),
 ):
-    result = await db.execute(select(VivaSession).where(VivaSession.id == uuid.UUID(session_id)))
+    """Candidate starts their live examination."""
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session UUID")
+
+    result = await db.execute(select(VivaSession).where(VivaSession.id == session_uuid))
     session = result.scalar_one_or_none()
     if not session:
-        raise HTTPException(404)
-    if str(session.student_id) != current["sub"]:
-        raise HTTPException(403)
-    if not session.consent_given:
-        raise HTTPException(400, "Consent not given")
+        raise HTTPException(status_code=404, detail="Session not found")
 
+    if current.get("role") == "student" and str(session.student_id) != current["sub"]:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if not session.consent_given:
+        raise HTTPException(status_code=400, detail="Academic honor consent not granted")
+
+    if session.status not in (SessionStatus.scheduled, SessionStatus.in_progress):
+        raise HTTPException(status_code=409, detail="This examination has already ended")
     session.status = SessionStatus.in_progress
-    session.started_at = datetime.now(timezone.utc)
+    session.started_at = session.started_at or datetime.now(timezone.utc)
     await db.commit()
     return {"status": "started", "started_at": session.started_at}
 
@@ -182,18 +283,29 @@ async def end_session(
     db: AsyncSession = Depends(get_db),
     current: dict = Depends(get_current_user),
 ):
-    result = await db.execute(select(VivaSession).where(VivaSession.id == uuid.UUID(session_id)))
+    """End viva examination session and queue scoring task."""
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session UUID")
+
+    result = await db.execute(select(VivaSession).where(VivaSession.id == session_uuid))
     session = result.scalar_one_or_none()
     if not session:
-        raise HTTPException(404)
+        raise HTTPException(status_code=404, detail="Session not found")
 
+    # Candidate or faculty only
+    if current.get("role") == "student" and str(session.student_id) != current["sub"]:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if session.status in (SessionStatus.completed, SessionStatus.flagged):
+        return {"status": "completed", "scoring": "already_requested"}
+    if session.status != SessionStatus.in_progress:
+        raise HTTPException(status_code=409, detail="This examination has not started")
     session.status = SessionStatus.completed
     session.ended_at = datetime.now(timezone.utc)
+    await enqueue_scoring(db, session_uuid)
     await db.commit()
-
-    # Trigger scoring job
-    from app.workers.tasks import score_session_task
-    score_session_task.delay(session_id)
 
     return {"status": "completed", "scoring": "queued"}
 
@@ -204,14 +316,24 @@ async def give_consent(
     db: AsyncSession = Depends(get_db),
     current: dict = Depends(get_current_user),
 ):
-    result = await db.execute(select(VivaSession).where(VivaSession.id == uuid.UUID(session_id)))
+    """Grant academic honor consent for this session."""
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session UUID")
+
+    result = await db.execute(select(VivaSession).where(VivaSession.id == session_uuid))
     session = result.scalar_one_or_none()
     if not session:
-        raise HTTPException(404)
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if current.get("role") == "student" and str(session.student_id) != current["sub"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Cannot sign consent for another student")
+
     session.consent_given = True
     session.consent_at = datetime.now(timezone.utc)
     await db.commit()
-    return {"consent_given": True}
+    return {"consent_given": True, "consent_at": session.consent_at}
 
 
 @router.post("/{session_id}/override")
@@ -221,32 +343,212 @@ async def override_score(
     db: AsyncSession = Depends(get_db),
     current: dict = Depends(require_faculty),
 ):
-    """Faculty override — always wins, logged in audit trail."""
-    if not (0 <= req.override_score <= 100):
-        raise HTTPException(400, "Score must be 0-100")
+    """Faculty mark override with mandatory justification and audit logging."""
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session UUID")
 
-    result = await db.execute(select(VivaSession).where(VivaSession.id == uuid.UUID(session_id)))
+    result = await db.execute(select(VivaSession).where(VivaSession.id == session_uuid))
     session = result.scalar_one_or_none()
     if not session:
-        raise HTTPException(404)
+        raise HTTPException(status_code=404, detail="Session not found")
 
     old_score = session.total_score
     session.override_score = req.override_score
     session.override_by = uuid.UUID(current["sub"])
-    session.override_reason = req.reason
+    session.override_reason = req.reason.strip()
     session.override_at = datetime.now(timezone.utc)
     session.review_status = ReviewStatus.overridden
 
     log = AuditLog(
-        session_id=uuid.UUID(session_id),
+        session_id=session_uuid,
         actor_id=uuid.UUID(current["sub"]),
         action="score_override",
         detail={
             "old_score": old_score,
             "new_score": req.override_score,
-            "reason": req.reason,
+            "reason": req.reason.strip(),
+            "actor_role": current.get("role", "faculty"),
         },
     )
     db.add(log)
     await db.commit()
-    return {"override_score": req.override_score, "logged": True}
+    return {
+        "session_id": session_id,
+        "override_score": req.override_score,
+        "logged": True,
+        "timestamp": session.override_at,
+    }
+
+
+@router.post("/{session_id}/audio")
+async def upload_session_audio(
+    session_id: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current: dict = Depends(get_current_user),
+):
+    """Upload recorded examination audio from student viva session."""
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session UUID")
+
+    result = await db.execute(select(VivaSession).where(VivaSession.id == session_uuid))
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if current.get("role") == "student" and str(session.student_id) != current["sub"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Cannot upload audio for other students")
+
+    allowed_types = {"audio/webm", "video/webm", "audio/ogg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/mpeg"}
+    if (file.content_type or "").split(";")[0] not in allowed_types:
+        raise HTTPException(status_code=415, detail="Unsupported audio format")
+    content = await file.read(settings.MAX_AUDIO_UPLOAD_BYTES + 1)
+    if len(content) > settings.MAX_AUDIO_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Audio recording exceeds the upload limit")
+    if not content:
+        raise HTTPException(status_code=400, detail="Audio file payload is empty")
+
+    storage = get_audio_storage()
+    content_type = file.content_type or "audio/webm"
+    audio_key = storage.save_session_audio(session_id, content, content_type=content_type)
+
+    session.audio_s3_key = audio_key
+    await db.commit()
+
+    logger.info(f"Uploaded {len(content)} bytes of audio for session {session_id} (key: {audio_key})")
+    return {
+        "status": "uploaded",
+        "session_id": session_id,
+        "audio_key": audio_key,
+        "size_bytes": len(content),
+        "content_type": content_type,
+        "audio_url": f"/api/v1/sessions/{session_id}/audio/stream",
+    }
+
+
+@router.get("/{session_id}/audio/stream")
+async def stream_session_audio(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    current: dict = Depends(get_current_user),
+):
+    """Directly stream examination audio with range header support for scrubbing."""
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session UUID")
+
+    result = await db.execute(select(VivaSession).where(VivaSession.id == session_uuid))
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if current.get("role") == "student" and str(session.student_id) != current["sub"]:
+        raise HTTPException(status_code=403, detail="Forbidden: You cannot access audio for other sessions")
+
+    from app.api.routes.recordings import reconstructed_audio
+    reconstructed = await reconstructed_audio(db, session_uuid)
+    if reconstructed is not None:
+        return reconstructed
+
+    storage = get_audio_storage()
+    local_path = storage.get_local_audio_path(session.audio_s3_key or session_id)
+    if local_path and local_path.exists():
+        media_type = "audio/webm"
+        if local_path.suffix.lower() == ".wav":
+            media_type = "audio/wav"
+        elif local_path.suffix.lower() == ".mp4":
+            media_type = "audio/mp4"
+
+        return FileResponse(
+            path=str(local_path),
+            media_type=media_type,
+            filename=f"session_{session_id}{local_path.suffix}",
+            headers={"Accept-Ranges": "bytes", "Cache-Control": "private, no-store"},
+        )
+
+    # If S3 presigned URL is available, redirect
+    if session.audio_s3_key:
+        presigned = storage.get_presigned_url(session.audio_s3_key)
+        if presigned:
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(presigned)
+
+    raise HTTPException(status_code=404, detail="Session audio recording is not available")
+
+
+@router.get("/{session_id}/audio")
+async def get_session_audio(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    current: dict = Depends(get_current_user),
+):
+    """Retrieve session audio playback URL."""
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session UUID")
+
+    result = await db.execute(select(VivaSession).where(VivaSession.id == session_uuid))
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if current.get("role") == "student" and str(session.student_id) != current["sub"]:
+        raise HTTPException(status_code=403, detail="Forbidden: You cannot access audio for other sessions")
+
+    storage = get_audio_storage()
+    from app.models.models import AudioChunk
+    chunk_exists = await db.scalar(select(AudioChunk.id).where(AudioChunk.session_id == session_uuid).limit(1))
+    has_audio = storage.has_audio(session.audio_s3_key or session_id)
+
+    if chunk_exists or has_audio or session.audio_s3_key:
+        audio_stream_url = f"/api/v1/sessions/{session_id}/audio/stream"
+        return {
+            "session_id": session_id,
+            "audio_url": audio_stream_url,
+            "status": "ready",
+        }
+
+    return {
+        "session_id": session_id,
+        "audio_url": None,
+        "status": "not_recorded",
+        "message": "Session audio stream has not been recorded yet.",
+    }
+
+
+@router.get("/{session_id}/scoring")
+async def scoring_status(session_id: uuid.UUID, db: AsyncSession = Depends(get_db), current=Depends(get_current_user)):
+    from app.models.models import ScoringJob
+    session = await db.get(VivaSession, session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    if current.get("role") == "student" and str(session.student_id) != current["sub"]:
+        raise HTTPException(403, "Session access denied")
+    job = await db.get(ScoringJob, session_id)
+    return {"status": job.status if job else ("completed" if session.total_score is not None else "not_requested"),
+            "attempts": job.attempts if job else 0, "message": job.last_error if job else None,
+            "review_status": session.review_status.value}
+
+
+@router.post("/{session_id}/scoring/retry")
+async def retry_scoring(session_id: uuid.UUID, db: AsyncSession = Depends(get_db), current=Depends(require_faculty)):
+    from app.models.models import ScoringJob
+    from app.services.scoring_jobs import now
+    session = await db.get(VivaSession, session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    job = await db.get(ScoringJob, session_id)
+    if not job or job.status != "failed":
+        raise HTTPException(409, "Only failed evaluations can be retried")
+    job.status, job.attempts, job.available_at, job.last_error = "queued", 0, now(), None
+    job.claim_token = job.lease_until = None
+    session.status = SessionStatus.completed
+    db.add(AuditLog(session_id=session_id, actor_id=uuid.UUID(current["sub"]), action="scoring_retry_requested", detail={}))
+    await db.commit()
+    return {"status": "queued"}

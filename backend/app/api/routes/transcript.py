@@ -24,6 +24,9 @@ class TurnResponse(BaseModel):
     phase: Optional[str]
     answer_label: Optional[str]
     stt_confidence: Optional[float]
+    answer_metadata: Optional[dict] = None
+    stt_words: Optional[list] = None
+    classifier_confidence: Optional[float] = None
     question_id: Optional[str]
     is_variant: bool
 
@@ -34,19 +37,24 @@ async def get_transcript(
     db: AsyncSession = Depends(get_db),
     current: dict = Depends(get_current_user),
 ):
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session UUID")
+
     # Verify access
     sess_result = await db.execute(
-        select(VivaSession).where(VivaSession.id == uuid.UUID(session_id))
+        select(VivaSession).where(VivaSession.id == session_uuid)
     )
     session = sess_result.scalar_one_or_none()
     if not session:
-        raise HTTPException(404)
-    if current["role"] == "student" and str(session.student_id) != current["sub"]:
-        raise HTTPException(403)
+        raise HTTPException(status_code=404, detail="Session not found")
+    if current.get("role") == "student" and str(session.student_id) != current["sub"]:
+        raise HTTPException(status_code=403, detail="Forbidden: You cannot access transcripts for other candidates")
 
     result = await db.execute(
         select(TranscriptTurn)
-        .where(TranscriptTurn.session_id == uuid.UUID(session_id))
+        .where(TranscriptTurn.session_id == session_uuid)
         .order_by(TranscriptTurn.turn_index)
     )
     turns = result.scalars().all()
@@ -62,6 +70,9 @@ async def get_transcript(
             phase=t.phase.value if t.phase else None,
             answer_label=t.answer_label.value if t.answer_label else None,
             stt_confidence=t.stt_confidence,
+            answer_metadata=t.answer_metadata,
+            stt_words=t.stt_words,
+            classifier_confidence=t.classifier_confidence,
             question_id=str(t.question_id) if t.question_id else None,
             is_variant=t.is_variant,
         )

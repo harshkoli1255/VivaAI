@@ -12,16 +12,26 @@ from app.models.models import (
     ScoreReport, AuditLog,
 )
 from app.core.security import hash_password
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 async def init_db():
-    """Create tables if not exist and seed default records."""
+    """Create tables if not exist and seed default records (Development only)."""
+    if settings.IS_PRODUCTION:
+        logger.info("Production environment active: skipping automatic create_all and demo seeding. Managed via Alembic.")
+        return
+
     try:
-        # Create all tables if they don't exist
+        # Create all tables if they don't exist (dev only)
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            try:
+                from sqlalchemy import text
+                await conn.execute(text("ALTER TABLE viva_sessions ADD COLUMN proctoring_events JSON DEFAULT '[]'"))
+            except Exception:
+                pass  # column already exists in table
 
         async with AsyncSessionLocal() as session:
             # Check if faculty user already exists
@@ -172,96 +182,20 @@ async def init_db():
                     session.add(q)
 
                 await session.commit()
-
-            # Seed a completed session for the faculty review dashboard if none exists
-            res = await session.execute(
-                select(VivaSession).where(VivaSession.student_id == student1.id)
-            )
-            sess1 = res.scalar_one_or_none()
-            if not sess1:
-                now = datetime.now(timezone.utc)
-                sess1_id = uuid.UUID("44444444-4444-4444-4444-444444444441")
-                sess1 = VivaSession(
-                    id=sess1_id,
-                    viva_config_id=config_id,
-                    student_id=student1.id,
-                    status=SessionStatus.completed,
-                    current_phase=VivaPhase.completed,
-                    started_at=now - timedelta(hours=2),
-                    ended_at=now - timedelta(hours=2) + timedelta(minutes=15),
-                    elapsed_secs=900,
-                    consent_given=True,
-                    consent_at=now - timedelta(hours=2),
-                    total_score=84.5,
-                    review_status=ReviewStatus.pending,
-                    tab_switch_count=0,
-                    long_silence_count=0,
-                    stt_low_confidence_count=0,
-                )
-                session.add(sess1)
-                await session.flush()
-
-                # Add sample transcript turns
-                turns_data = [
-                    ("ai", "Welcome to your viva examination. I'm your AI interviewer. Let's begin with a brief introduction of your systems programming background.", 0.0, VivaPhase.warm_up),
-                    ("student", "I have implemented a multi-threaded web server in C using POSIX pthreads, socket programming, and an epoll event loop.", 8.5, VivaPhase.warm_up),
-                    ("ai", "Good. Let's move to fundamentals. What are the four necessary Coffman conditions required for a deadlock to occur?", 35.0, VivaPhase.fundamentals),
-                    ("student", "The four Coffman conditions are mutual exclusion, hold and wait, no preemption, and circular wait. All four must hold simultaneously for a deadlock to happen.", 48.0, VivaPhase.fundamentals),
-                    ("ai", "Precisely stated. In the context of Banker's Algorithm, how does the system evaluate safety before allocating resources?", 310.0, VivaPhase.depth),
-                    ("student", "Banker's algorithm checks if there exists a safe sequence of processes that can finish execution with available resources plus currently allocated resources.", 335.0, VivaPhase.depth),
-                    ("ai", "How would you design a thread-safe bounded buffer queue to avoid race conditions?", 615.0, VivaPhase.applied),
-                    ("student", "I would use a mutex lock for buffer access, and two condition variables: not_full and not_empty. Producers wait on not_full and signal not_empty.", 645.0, VivaPhase.applied),
-                    ("ai", "That concludes our 15-minute examination. Your responses will now be scored against the evaluation rubric.", 880.0, VivaPhase.wrap_up),
-                ]
-
-                for idx, (speaker, text_turn, t_sec, phase) in enumerate(turns_data):
-                    turn = TranscriptTurn(
-                        id=uuid.uuid4(),
-                        session_id=sess1_id,
-                        turn_index=idx,
-                        speaker=speaker,
-                        text=text_turn,
-                        timestamp_secs=t_sec,
-                        duration_secs=15.0 if speaker == "student" else 6.0,
-                        phase=phase,
-                        answer_label=AnswerLabel.strong if speaker == "student" else None,
-                        stt_confidence=0.98 if speaker == "student" else None,
-                    )
-                    session.add(turn)
-
-                # Add ScoreReport
-                score_rep = ScoreReport(
-                    id=uuid.uuid4(),
-                    session_id=sess1_id,
-                    prompt_version="v1.2",
-                    conceptual_score=88.0,
-                    depth_reasoning_score=84.0,
-                    problem_solving_score=82.0,
-                    practical_project_score=85.0,
-                    communication_score=84.0,
-                    conceptual_reason="Accurately recited all four Coffman conditions with correct definition of circular wait.",
-                    depth_reasoning_reason="Sound mathematical comprehension of safe state determination in Banker's algorithm.",
-                    problem_solving_reason="Correct implementation strategy for bounded buffer synchronization with dual condition variables.",
-                    practical_project_reason="Demonstrated hands-on familiarity with POSIX threads, socket programming, and epoll.",
-                    communication_reason="Clear, concise, and structured responses with zero filler words.",
-                    conceptual_turn_ids=["turn-3"],
-                    depth_reasoning_turn_ids=["turn-5"],
-                    problem_solving_turn_ids=["turn-7"],
-                    practical_project_turn_ids=["turn-1"],
-                    communication_turn_ids=["turn-1", "turn-3", "turn-5", "turn-7"],
-                    total_score=84.5,
-                    feedback_lines=[
-                        "Strong mastery of concurrent synchronization primitives and deadlock conditions.",
-                        "Good explanation of Banker's Algorithm safe sequence derivation.",
-                        "Clear verbal communication with precise technical vocabulary.",
-                    ],
-                    low_confidence_flag=False,
-                    low_confidence_reasons=[],
-                    model_used="gpt-4o",
-                )
-                session.add(score_rep)
-
-                await session.commit()
-                logger.info("Database initialized and seeded with demo records.")
+                logger.info("Database schema and core configurations verified.")
     except Exception as e:
         logger.error(f"Error during database initialization: {e}", exc_info=True)
+
+
+async def purge_dummy_data():
+    """Remove any dummy sessions, synthetic transcripts, and mock score reports."""
+    from sqlalchemy import delete
+    dummy_session_id = uuid.UUID("44444444-4444-4444-4444-444444444441")
+    async with AsyncSessionLocal() as session:
+        # Delete related turns and reports
+        await session.execute(delete(TranscriptTurn).where(TranscriptTurn.session_id == dummy_session_id))
+        await session.execute(delete(ScoreReport).where(ScoreReport.session_id == dummy_session_id))
+        await session.execute(delete(AuditLog).where(AuditLog.session_id == dummy_session_id))
+        await session.execute(delete(VivaSession).where(VivaSession.id == dummy_session_id))
+        await session.commit()
+        logger.info("Dummy sessions and synthetic records successfully purged from database.")

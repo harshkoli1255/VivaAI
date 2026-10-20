@@ -5,7 +5,7 @@ from typing import Optional, List
 from enum import Enum as PyEnum
 
 from sqlalchemy import (
-    String, Text, Integer, Float, Boolean, DateTime,
+    String, Text, Integer, Float, Boolean, DateTime, LargeBinary,
     ForeignKey, JSON, Enum, UniqueConstraint, Index,
 )
 from sqlalchemy import Uuid as UUID
@@ -180,6 +180,7 @@ class VivaSession(Base):
     tab_switch_count: Mapped[int] = mapped_column(Integer, default=0)
     long_silence_count: Mapped[int] = mapped_column(Integer, default=0)
     stt_low_confidence_count: Mapped[int] = mapped_column(Integer, default=0)
+    proctoring_events: Mapped[Optional[List[dict]]] = mapped_column(JSON, default=list, nullable=True)
 
     # Final score
     total_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
@@ -221,6 +222,7 @@ class TranscriptTurn(Base):
 
     # STT metadata
     stt_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    answer_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     stt_words: Mapped[Optional[List]] = mapped_column(JSON, nullable=True)
 
     # Question tracking
@@ -300,3 +302,47 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     session: Mapped["VivaSession"] = relationship("VivaSession", back_populates="audit_logs")
+
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class AudioChunk(Base):
+    """Immutable recording fragments; acknowledged bytes are durable in the database."""
+    __tablename__ = "audio_chunks"
+    __table_args__ = (UniqueConstraint("session_id", "capture_id", "sequence"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("viva_sessions.id"), index=True)
+    capture_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    sequence: Mapped[int] = mapped_column(Integer)
+    start_secs: Mapped[float] = mapped_column(Float)
+    content_type: Mapped[str] = mapped_column(String(128))
+    digest: Mapped[str] = mapped_column(String(64))
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ScoringJob(Base):
+    """Transactional outbox and renewable processing lease, one job per exam."""
+    __tablename__ = "scoring_jobs"
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("viva_sessions.id"), primary_key=True)
+    status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    lease_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    claim_token: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AuthRateLimit(Base):
+    __tablename__ = "auth_rate_limits"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    count: Mapped[int] = mapped_column(Integer, default=0)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

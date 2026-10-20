@@ -7,7 +7,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -56,8 +56,8 @@ async def list_sessions(
     review_status: Optional[str] = None,
     config_id: Optional[str] = None,
     search: Optional[str] = None,
-    page: int = 1,
-    page_size: int = 20,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current: dict = Depends(require_faculty),
 ):
@@ -71,12 +71,29 @@ async def list_sessions(
         .order_by(VivaSession.created_at.desc())
     )
 
-    if status:
-        query = query.where(VivaSession.status == SessionStatus(status))
-    if review_status:
-        query = query.where(VivaSession.review_status == ReviewStatus(review_status))
+    if status and status.lower() != "all":
+        try:
+            query = query.where(VivaSession.status == SessionStatus(status))
+        except ValueError:
+            pass
+    if review_status and review_status.lower() != "all":
+        try:
+            query = query.where(VivaSession.review_status == ReviewStatus(review_status))
+        except ValueError:
+            pass
     if config_id:
-        query = query.where(VivaSession.viva_config_id == uuid.UUID(config_id))
+        try:
+            query = query.where(VivaSession.viva_config_id == uuid.UUID(config_id))
+        except ValueError:
+            pass
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        query = query.where(or_(
+            VivaSession.student.has(User.name.ilike(pattern)),
+            VivaSession.student.has(User.student_id.ilike(pattern)),
+            VivaSession.viva_config.has(VivaConfig.title.ilike(pattern)),
+            VivaSession.viva_config.has(VivaConfig.subject.ilike(pattern)),
+        ))
 
     # Count total
     count_q = select(func.count()).select_from(query.subquery())
@@ -111,7 +128,7 @@ async def list_sessions(
 
 @router.get("/sessions/{session_id}/detail")
 async def session_detail(
-    session_id: str,
+    session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current: dict = Depends(require_faculty),
 ):
@@ -128,22 +145,19 @@ async def session_detail(
             selectinload(VivaSession.score_report),
             selectinload(VivaSession.audit_logs),
         )
-        .where(VivaSession.id == uuid.UUID(session_id))
+        .where(VivaSession.id == session_id)
     )
     session = result.scalar_one_or_none()
     if not session:
         from fastapi import HTTPException
         raise HTTPException(404)
 
-    # Audio URL
+    # Audio URL - direct resilient streaming endpoint
     audio_url = None
-    if session.audio_s3_key:
-        try:
-            storage = get_audio_storage()
-            if storage:
-                audio_url = storage.get_presigned_url(session.audio_s3_key)
-        except Exception:
-            pass
+    from app.models.models import AudioChunk
+    has_chunks = await db.scalar(select(AudioChunk.id).where(AudioChunk.session_id == session.id).limit(1))
+    if has_chunks or session.audio_s3_key or get_audio_storage().has_audio(str(session.id)):
+        audio_url = f"/api/v1/sessions/{session.id}/audio/stream"
 
     return {
         "session": {
@@ -158,6 +172,7 @@ async def session_detail(
             "override_at": session.override_at,
             "tab_switch_count": session.tab_switch_count,
             "long_silence_count": session.long_silence_count,
+            "proctoring_events": session.proctoring_events or [],
             "audio_url": audio_url,
         },
         "student": {
@@ -180,6 +195,8 @@ async def session_detail(
                 "phase": t.phase.value if t.phase else None,
                 "answer_label": t.answer_label.value if t.answer_label else None,
                 "stt_confidence": t.stt_confidence,
+                "answer_metadata": t.answer_metadata,
+                "classifier_confidence": t.classifier_confidence,
             }
             for t in sorted(session.turns, key=lambda x: x.turn_index)
         ],
@@ -215,12 +232,15 @@ async def session_detail(
             }
             for log in sorted(session.audit_logs, key=lambda x: x.created_at)
         ],
+        "evaluation_review": next((log.detail for log in sorted(session.audit_logs, key=lambda x: x.created_at, reverse=True)
+                                   if log.action == "scoring_review_required"), None),
     }
 
 
 @router.get("/export/csv")
 async def export_csv(
     status: Optional[str] = None,
+    search: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current: dict = Depends(require_faculty),
 ):
@@ -233,8 +253,19 @@ async def export_csv(
         )
         .order_by(VivaSession.created_at.desc())
     )
-    if status:
-        query = query.where(VivaSession.status == SessionStatus(status))
+    if status and status.lower() != "all":
+        try:
+            query = query.where(VivaSession.status == SessionStatus(status))
+        except ValueError:
+            pass
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        query = query.where(or_(
+            VivaSession.student.has(User.name.ilike(pattern)),
+            VivaSession.student.has(User.student_id.ilike(pattern)),
+            VivaSession.viva_config.has(VivaConfig.title.ilike(pattern)),
+            VivaSession.viva_config.has(VivaConfig.subject.ilike(pattern)),
+        ))
 
     result = await db.execute(query)
     sessions = result.scalars().all()

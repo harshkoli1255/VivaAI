@@ -7,14 +7,14 @@ import uuid
 from typing import Optional
 
 from celery import shared_task
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 
 from app.workers.celery_app import celery_app
 from app.db.session import AsyncSessionLocal
 from app.models.models import (
     VivaSession, TranscriptTurn, ScoreReport, AuditLog,
-    SessionStatus, ReviewStatus,
+    SessionStatus, ReviewStatus, ScoringJob,
 )
 from app.services.scorer import score_session
 from app.services.llm_provider import get_llm_provider
@@ -48,7 +48,7 @@ def score_session_task(self, session_id: str):
         raise self.retry(exc=exc)
 
 
-async def _score_session_async(session_id: str):
+async def _score_session_async(session_id: str, claim_token=None):
     async with AsyncSessionLocal() as db:
         # Load session with turns
         result = await db.execute(
@@ -56,6 +56,7 @@ async def _score_session_async(session_id: str):
             .options(
                 selectinload(VivaSession.turns),
                 selectinload(VivaSession.viva_config),
+                selectinload(VivaSession.score_report),
             )
             .where(VivaSession.id == uuid.UUID(session_id))
         )
@@ -66,6 +67,10 @@ async def _score_session_async(session_id: str):
             return
 
         if session.score_report:
+            if claim_token:
+                await db.execute(update(ScoringJob).where(ScoringJob.session_id == session.id,
+                    ScoringJob.claim_token == claim_token).values(status="completed", claim_token=None, lease_until=None))
+                await db.commit()
             logger.info(f"Session {session_id} already scored")
             return
 
@@ -77,6 +82,8 @@ async def _score_session_async(session_id: str):
                 "text": t.text,
                 "answer_label": t.answer_label.value if t.answer_label else None,
                 "stt_confidence": t.stt_confidence,
+                "answer_metadata": t.answer_metadata,
+                "classifier_confidence": t.classifier_confidence,
             }
             for t in sorted(session.turns, key=lambda x: x.turn_index)
         ]
@@ -86,56 +93,94 @@ async def _score_session_async(session_id: str):
             "problem_solving": 20, "practical_project": 15, "communication": 10,
         }
 
-        llm = get_llm_provider()
-        model_name = "mock" if hasattr(llm, 'QUESTION_BANK') else "gpt-4o"
+        try:
+            llm = get_llm_provider()
+            model_name = "mock" if hasattr(llm, 'QUESTION_BANK') else getattr(llm, "strong_model", "configured")
+            score_data = await score_session(
+                session_id=session_id,
+                turns=turns_data,
+                rubric_weights=weights,
+                llm=llm,
+                model_name=model_name,
+            )
+        except Exception:
+            if claim_token:
+                raise
+            # A provider failure cannot be converted into invented academic marks.
+            session.status = SessionStatus.flagged
+            session.review_status = ReviewStatus.pending
+            db.add(AuditLog(session_id=uuid.UUID(session_id), action="scoring_failed",
+                            detail={"reason": "Evaluation provider unavailable; manual review required"}))
+            await db.commit()
+            logger.exception("Scoring failed; session retained for review: %s", session_id)
+            raise
 
-        score_data = await score_session(
-            session_id=session_id,
-            turns=turns_data,
-            rubric_weights=weights,
-            llm=llm,
-            model_name=model_name,
-        )
+        # Missing evidence requires human assessment, not a fabricated numeric
+        # grade. Complete the job in an explicit terminal review state.
+        if score_data.get("needs_faculty_review"):
+            if claim_token:
+                fenced = await db.execute(update(ScoringJob).where(
+                    ScoringJob.session_id == session.id, ScoringJob.claim_token == claim_token,
+                    ScoringJob.status == "processing").values(status="review_required",
+                    claim_token=None, lease_until=None, last_error="Answers saved. Faculty review is required to verify grading evidence."))
+                if not fenced.rowcount:
+                    await db.rollback()
+                    return
+            session.status = SessionStatus.flagged
+            session.review_status = ReviewStatus.pending
+            db.add(AuditLog(session_id=session.id, action="scoring_review_required",
+                detail={"reasons": score_data["low_confidence_reasons"], "model": model_name,
+                        "prompt_version": score_data["prompt_version"], "feedback": score_data["feedback_lines"]}))
+            await db.commit()
+            return
 
+        # Fencing prevents an expired worker from publishing a second grade.
+        if claim_token:
+            result = await db.execute(update(ScoringJob).where(ScoringJob.session_id == session.id,
+                ScoringJob.claim_token == claim_token, ScoringJob.status == "processing").values(
+                status="completed", claim_token=None, lease_until=None, last_error=None))
+            if not result.rowcount:
+                await db.rollback()
+                return
         # Persist score report
         report = ScoreReport(
             session_id=uuid.UUID(session_id),
-            prompt_version=score_data["prompt_version"],
-            conceptual_score=score_data["conceptual_score"],
-            depth_reasoning_score=score_data["depth_reasoning_score"],
-            problem_solving_score=score_data["problem_solving_score"],
-            practical_project_score=score_data["practical_project_score"],
-            communication_score=score_data["communication_score"],
-            conceptual_reason=score_data["conceptual_reason"],
-            depth_reasoning_reason=score_data["depth_reasoning_reason"],
-            problem_solving_reason=score_data["problem_solving_reason"],
-            practical_project_reason=score_data["practical_project_reason"],
-            communication_reason=score_data["communication_reason"],
-            conceptual_turn_ids=score_data["conceptual_turn_ids"],
-            depth_reasoning_turn_ids=score_data["depth_reasoning_turn_ids"],
-            problem_solving_turn_ids=score_data["problem_solving_turn_ids"],
-            practical_project_turn_ids=score_data["practical_project_turn_ids"],
-            communication_turn_ids=score_data["communication_turn_ids"],
-            total_score=score_data["total_score"],
-            feedback_lines=score_data["feedback_lines"],
-            low_confidence_flag=score_data["low_confidence_flag"],
+            prompt_version=str(score_data.get("prompt_version", "v1")),
+            conceptual_score=float(score_data.get("conceptual_score", 0.0)),
+            depth_reasoning_score=float(score_data.get("depth_reasoning_score", 0.0)),
+            problem_solving_score=float(score_data.get("problem_solving_score", 0.0)),
+            practical_project_score=float(score_data.get("practical_project_score", 0.0)),
+            communication_score=float(score_data.get("communication_score", 0.0)),
+            conceptual_reason=str(score_data.get("conceptual_reason", "")),
+            depth_reasoning_reason=str(score_data.get("depth_reasoning_reason", "")),
+            problem_solving_reason=str(score_data.get("problem_solving_reason", "")),
+            practical_project_reason=str(score_data.get("practical_project_reason", "")),
+            communication_reason=str(score_data.get("communication_reason", "")),
+            conceptual_turn_ids=score_data.get("conceptual_turn_ids", []),
+            depth_reasoning_turn_ids=score_data.get("depth_reasoning_turn_ids", []),
+            problem_solving_turn_ids=score_data.get("problem_solving_turn_ids", []),
+            practical_project_turn_ids=score_data.get("practical_project_turn_ids", []),
+            communication_turn_ids=score_data.get("communication_turn_ids", []),
+            total_score=float(score_data.get("total_score", 0.0)),
+            feedback_lines=score_data.get("feedback_lines", []),
+            low_confidence_flag=bool(score_data.get("low_confidence_flag", False)),
             low_confidence_reasons=score_data.get("low_confidence_reasons", []),
-            model_used=score_data["model_used"],
+            model_used=str(score_data.get("model_used", model_name)),
         )
         db.add(report)
 
         # Update session
-        session.total_score = score_data["total_score"]
+        session.total_score = float(score_data.get("total_score", 0.0))
         session.score_breakdown = {
-            "conceptual": score_data["conceptual_score"],
-            "depth_reasoning": score_data["depth_reasoning_score"],
-            "problem_solving": score_data["problem_solving_score"],
-            "practical_project": score_data["practical_project_score"],
-            "communication": score_data["communication_score"],
+            "conceptual": float(score_data.get("conceptual_score", 0.0)),
+            "depth_reasoning": float(score_data.get("depth_reasoning_score", 0.0)),
+            "problem_solving": float(score_data.get("problem_solving_score", 0.0)),
+            "practical_project": float(score_data.get("practical_project_score", 0.0)),
+            "communication": float(score_data.get("communication_score", 0.0)),
         }
-        session.score_prompt_version = score_data["prompt_version"]
+        session.score_prompt_version = str(score_data.get("prompt_version", "v1"))
 
-        if score_data["low_confidence_flag"]:
+        if score_data.get("low_confidence_flag", False):
             session.status = SessionStatus.flagged
             session.review_status = ReviewStatus.pending
         else:

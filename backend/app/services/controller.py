@@ -111,6 +111,8 @@ class ControllerState:
     # Per-turn tracking
     current_question_id: Optional[str] = None
     hint_given: bool = False          # for partial answers
+    follow_up_count: int = 0          # tracks probing follow-ups on the current question
+    max_follow_ups_per_question: int = 1
     questions_asked_this_phase: int = 0
     consecutive_dont_knows: int = 0
 
@@ -118,14 +120,19 @@ class ControllerState:
     last_student_turn_at: float = 0.0
     student_speaking_since: Optional[float] = None
 
-    # Stats
+    # Stats & correlated proctoring timeline events
     tab_switch_count: int = 0
     long_silence_count: int = 0
     stt_low_conf_count: int = 0
+    proctoring_events: List[Dict[str, Any]] = field(default_factory=list)
 
     # Termination
     is_active: bool = True
     wrap_up_initiated: bool = False
+
+    def __post_init__(self):
+        if not self.phase_timings:
+            self.phase_timings = dict(DEFAULT_PHASE_TIMINGS)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -148,6 +155,10 @@ class InterviewController:
     def __init__(self, state: ControllerState):
         self.state = state
 
+    @property
+    def total_duration(self) -> float:
+        return max(timing["end"] for timing in self.state.phase_timings.values())
+
     # ── Time management ────────────────────────────────────────
 
     def tick(self, elapsed_secs: float) -> Optional[PolicyDecision]:
@@ -161,16 +172,28 @@ class InterviewController:
         self.state.elapsed_secs = elapsed_secs
 
         # Hard cutoff
-        if elapsed_secs >= TOTAL_SECS:
+        if elapsed_secs >= self.total_duration:
             return self._end_interview("Time limit reached.")
+
+        # A missing VAD-end event must not hold a phase open indefinitely.
+        speaking_since = self.state.student_speaking_since
+        overlong_answer = speaking_since is not None and elapsed_secs - speaking_since >= MAX_ANSWER_SECS
+        if overlong_answer:
+            self.state.student_speaking_since = None
+            self.state.last_student_turn_at = elapsed_secs
 
         # Phase transition
         next_phase = self._compute_phase(elapsed_secs)
         if next_phase != self.state.phase:
+            # If candidate is actively speaking, defer transition until they finish their turn
+            if self.state.student_speaking_since is not None:
+                return None
+
             old = self.state.phase
             self.state.phase = next_phase
             self.state.questions_asked_this_phase = 0
             self.state.hint_given = False
+            self.state.follow_up_count = 0
             logger.info("Phase transition", extra={
                 "session_id": self.state.session_id,
                 "from": old,
@@ -183,20 +206,31 @@ class InterviewController:
             return PolicyDecision(action="end_phase",
                                   message=self._phase_transition_message(old, next_phase))
 
+        if overlong_answer:
+            return PolicyDecision(action="redirect", message="Thank you. Let's pause there and keep moving.")
+
         # Silence check (only during active student turns)
         if self.state.student_speaking_since is None:
             silence = elapsed_secs - self.state.last_student_turn_at
             if silence > SILENCE_PROMPT_SECS and self.state.last_student_turn_at > 0:
                 self.state.last_student_turn_at = elapsed_secs  # reset so we don't spam
                 self.state.long_silence_count += 1
+                self.state.proctoring_events.append({
+                    "event_type": "long_silence",
+                    "timestamp_secs": round(elapsed_secs, 1),
+                    "question_id": self.state.current_question_id,
+                    "phase": self.state.phase.value,
+                    "message": f"Extended silence detected ({SILENCE_PROMPT_SECS}s)",
+                })
                 return PolicyDecision(action="prompt_silence",
                                       message="Take your time. Feel free to share what you know.")
 
         return None
 
     def _compute_phase(self, elapsed: float) -> Phase:
+        timings = self.state.phase_timings or DEFAULT_PHASE_TIMINGS
         for phase in PHASE_ORDER[:-1]:
-            timing = self.state.phase_timings.get(phase, DEFAULT_PHASE_TIMINGS.get(phase))
+            timing = timings.get(phase, DEFAULT_PHASE_TIMINGS.get(phase))
             if timing and timing["start"] <= elapsed < timing["end"]:
                 return phase
         return Phase.scoring
@@ -222,7 +256,18 @@ class InterviewController:
         if stt_confidence is not None and stt_confidence < 0.6:
             self.state.stt_low_conf_count += 1
 
+        timing_decision = self.tick(elapsed_secs)
+        if timing_decision and timing_decision.action in ("end_phase", "end_interview"):
+            return timing_decision
+
         label = classification.label
+        if classification.confidence < .6 or (stt_confidence is not None and stt_confidence < .6):
+            if not self.state.hint_given:
+                self.state.hint_given = True
+                return PolicyDecision(action="give_hint", message="Please clarify your answer with an example.")
+            self.state.hint_given = False
+            self.state.follow_up_count = 0
+            return PolicyDecision(action="move_on", message="Your answer is saved. Let's try another topic.")
 
         # Long answer redirect
         if duration_secs > MAX_ANSWER_SECS:
@@ -242,6 +287,8 @@ class InterviewController:
         # Don't know
         if label == AnswerLabel.dont_know:
             self.state.consecutive_dont_knows += 1
+            self.state.follow_up_count = 0
+            self.state.hint_given = False
             return PolicyDecision(
                 action="move_on",
                 message="That's fine — no worries. Let's try a different question.",
@@ -249,29 +296,40 @@ class InterviewController:
 
         self.state.consecutive_dont_knows = 0
 
-        # Strong answer
+        # Strong answer: dynamic follow-up probing
         if label == AnswerLabel.strong:
-            return PolicyDecision(
-                action="ask_follow_up",
-                message=None,  # LLM generates the follow-up
-            )
+            if self.state.follow_up_count < self.state.max_follow_ups_per_question:
+                self.state.follow_up_count += 1
+                return PolicyDecision(
+                    action="ask_follow_up",
+                    message=None,  # LLM generates the probing follow-up
+                )
+            else:
+                self.state.follow_up_count = 0
+                return PolicyDecision(
+                    action="move_on",
+                    message="Excellent depth of understanding. Let's move on to the next topic.",
+                )
 
-        # Partial answer
+        # Partial answer: diagnostic hint branching
         if label == AnswerLabel.partial:
             if not self.state.hint_given:
                 self.state.hint_given = True
                 return PolicyDecision(
                     action="give_hint",
-                    message=None,  # LLM generates the hint
+                    message=None,  # LLM generates targeted diagnostic hint
                 )
             else:
                 # Already gave one hint — move on
                 self.state.hint_given = False
+                self.state.follow_up_count = 0
                 return PolicyDecision(
                     action="move_on",
                     message="Good effort. Let's move on to the next area.",
                 )
 
+        self.state.follow_up_count = 0
+        self.state.hint_given = False
         return PolicyDecision(action="move_on")
 
     def on_student_speaking_start(self, elapsed_secs: float):
@@ -281,12 +339,29 @@ class InterviewController:
         self.state.student_speaking_since = None
         self.state.last_student_turn_at = elapsed_secs
 
-    def on_tab_switch(self):
+    def on_tab_switch(
+        self,
+        elapsed_secs: Optional[float] = None,
+        question_id: Optional[str] = None,
+        question_text: Optional[str] = None,
+    ) -> Dict[str, Any]:
         self.state.tab_switch_count += 1
+        ts = round(elapsed_secs if elapsed_secs is not None else self.state.elapsed_secs, 1)
+        event = {
+            "event_type": "tab_switch",
+            "timestamp_secs": ts,
+            "question_id": question_id or self.state.current_question_id,
+            "question_text": question_text,
+            "phase": self.state.phase.value,
+            "message": "Candidate navigated away from viva window",
+        }
+        self.state.proctoring_events.append(event)
         logger.warning("Tab switch detected", extra={
             "session_id": self.state.session_id,
             "count": self.state.tab_switch_count,
+            "timestamp": ts,
         })
+        return event
 
     # ── Internal helpers ──────────────────────────────────────
 
@@ -324,6 +399,9 @@ class InterviewController:
             "tab_switch_count": self.state.tab_switch_count,
             "long_silence_count": self.state.long_silence_count,
             "stt_low_conf_count": self.state.stt_low_conf_count,
+            "follow_up_count": self.state.follow_up_count,
+            "hint_given": self.state.hint_given,
+            "proctoring_events": self.state.proctoring_events,
         }
 
     @classmethod
@@ -337,6 +415,9 @@ class InterviewController:
             tab_switch_count=snapshot.get("tab_switch_count", 0),
             long_silence_count=snapshot.get("long_silence_count", 0),
             stt_low_conf_count=snapshot.get("stt_low_conf_count", 0),
+            follow_up_count=snapshot.get("follow_up_count", 0),
+            hint_given=snapshot.get("hint_given", False),
+            proctoring_events=snapshot.get("proctoring_events", []),
         )
         if phase_timings:
             state.phase_timings = {Phase(k): v for k, v in phase_timings.items()}

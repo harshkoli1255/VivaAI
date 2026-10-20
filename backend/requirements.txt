@@ -5,6 +5,8 @@ python-multipart==0.0.12
 
 # Async database
 sqlalchemy[asyncio]==2.0.36
+aiosqlite==0.22.1
+reportlab==5.0.1
 asyncpg==0.30.0
 alembic==1.13.3
 psycopg2-binary==2.9.10
@@ -59,3 +61,6 @@ python-dotenv==1.0.1
 tenacity==9.0.0
 aiofiles==24.1.0
 orjson==3.10.7
+
+# Portable FFmpeg binary for recording reconstruction
+imageio-ffmpeg==0.6.0

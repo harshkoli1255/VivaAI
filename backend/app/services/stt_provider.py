@@ -67,39 +67,46 @@ class MockSTTProvider(STTProvider):
 
 class DeepgramSTTProvider(STTProvider):
     def __init__(self):
-        try:
-            from deepgram import DeepgramClient, LiveTranscriptionEvents, LiveOptions
-            self.client = DeepgramClient(api_key=settings.DEEPGRAM_API_KEY)
-            self.LiveTranscriptionEvents = LiveTranscriptionEvents
-            self.LiveOptions = LiveOptions
-        except ImportError:
-            raise RuntimeError("deepgram-sdk not installed")
+        self.api_key = settings.DEEPGRAM_API_KEY
+        self.model = settings.DEEPGRAM_STT_MODEL
+        self.vocabulary = []
 
     async def transcribe_stream(
         self, audio_chunks: AsyncIterator[bytes]
     ) -> AsyncIterator[STTResult]:
-        # Deepgram streaming implementation
-        # This is a simplified version — production would use their WebSocket SDK
-        results_queue: asyncio.Queue[STTResult] = asyncio.Queue()
-
-        async def consume():
-            async for chunk in audio_chunks:
-                # In production, send chunk to Deepgram connection
-                pass
-            await results_queue.put(None)  # sentinel
-
-        asyncio.create_task(consume())
-
-        while True:
-            result = await results_queue.get()
-            if result is None:
-                break
-            yield result
+        # The interview sends a complete encoded answer, not raw live PCM.
+        # Preserve the container header and use Deepgram's prerecorded endpoint.
+        import httpx
+        audio = bytearray()
+        async for chunk in audio_chunks:
+            audio.extend(chunk)
+            if len(audio) > 2 * 1024 * 1024:
+                raise ValueError("Audio answer exceeds 2 MB")
+        if not audio:
+            return
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            params = [("model", self.model), ("smart_format", "true")]
+            # Nova-2 uses keywords; Nova-3 uses keyterm. Keep boosts modest:
+            # this is recognition context, never an instruction to invent words.
+            for term in self.vocabulary[:30]:
+                params.append(("keyterm", term) if self.model.startswith("nova-3") else ("keywords", f"{term}:1.2"))
+            response = await client.post(
+                "https://api.deepgram.com/v1/listen",
+                params=params,
+                headers={"Authorization": f"Token {self.api_key}", "Content-Type": "application/octet-stream"},
+                content=bytes(audio),
+            )
+            response.raise_for_status()
+            alternative = response.json()["results"]["channels"][0]["alternatives"][0]
+            yield STTResult(text=alternative["transcript"], confidence=alternative["confidence"],
+                            is_final=True, words=alternative.get("words", []))
 
 
 def get_stt_provider() -> STTProvider:
-    if settings.MOCK_MODE or not settings.DEEPGRAM_API_KEY:
+    if settings.MOCK_MODE:
         logger.info("Using Mock STT provider")
         return MockSTTProvider()
+    if not settings.DEEPGRAM_API_KEY:
+        raise RuntimeError("DEEPGRAM_API_KEY is required when mock mode is disabled")
     logger.info("Using Deepgram STT provider")
     return DeepgramSTTProvider()

@@ -1,9 +1,9 @@
 """Question bank management endpoints."""
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,25 +28,26 @@ class QuestionResponse(BaseModel):
 
 
 class ReviewRequest(BaseModel):
-    status: str  # "approved" | "rejected"
+    status: Literal["approved", "rejected"]
     note: Optional[str] = None
 
 
 class UpdateQuestionRequest(BaseModel):
-    text: Optional[str] = None
-    phase: Optional[str] = None
-    topic: Optional[str] = None
-    difficulty: Optional[str] = None
+    model_config = ConfigDict(str_strip_whitespace=True)
+    text: Optional[str] = Field(default=None, min_length=1, max_length=1024)
+    phase: Optional[Literal["warm_up", "fundamentals", "depth", "applied", "wrap_up"]] = None
+    topic: Optional[str] = Field(default=None, max_length=256)
+    difficulty: Optional[Literal["easy", "medium", "hard"]] = None
 
 
 @router.get("/config/{config_id}", response_model=List[QuestionResponse])
 async def list_questions(
-    config_id: str,
-    status: Optional[str] = None,
+    config_id: uuid.UUID,
+    status: Optional[QuestionStatus] = None,
     db: AsyncSession = Depends(get_db),
     current: dict = Depends(require_faculty),
 ):
-    query = select(Question).where(Question.viva_config_id == uuid.UUID(config_id))
+    query = select(Question).where(Question.viva_config_id == config_id)
     if status:
         query = query.where(Question.status == QuestionStatus(status))
     query = query.order_by(Question.created_at.desc())
@@ -64,12 +65,12 @@ async def list_questions(
 
 @router.patch("/{question_id}/review")
 async def review_question(
-    question_id: str,
+    question_id: uuid.UUID,
     req: ReviewRequest,
     db: AsyncSession = Depends(get_db),
     current: dict = Depends(require_faculty),
 ):
-    result = await db.execute(select(Question).where(Question.id == uuid.UUID(question_id)))
+    result = await db.execute(select(Question).where(Question.id == question_id))
     question = result.scalar_one_or_none()
     if not question:
         raise HTTPException(404, "Question not found")
@@ -87,12 +88,12 @@ async def review_question(
 
 @router.patch("/{question_id}")
 async def update_question(
-    question_id: str,
+    question_id: uuid.UUID,
     req: UpdateQuestionRequest,
     db: AsyncSession = Depends(get_db),
     current: dict = Depends(require_faculty),
 ):
-    result = await db.execute(select(Question).where(Question.id == uuid.UUID(question_id)))
+    result = await db.execute(select(Question).where(Question.id == question_id))
     question = result.scalar_one_or_none()
     if not question:
         raise HTTPException(404, "Question not found")
@@ -112,11 +113,11 @@ async def update_question(
 
 @router.delete("/{question_id}")
 async def delete_question(
-    question_id: str,
+    question_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current: dict = Depends(require_faculty),
 ):
-    result = await db.execute(select(Question).where(Question.id == uuid.UUID(question_id)))
+    result = await db.execute(select(Question).where(Question.id == question_id))
     question = result.scalar_one_or_none()
     if not question:
         raise HTTPException(404, "Question not found")

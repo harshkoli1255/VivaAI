@@ -1,0 +1,25 @@
+{
+  "name": "vivaai-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:student": "cd apps/student-web && NEXT_BUILD_DIR=.next-local ../../node_modules/.bin/next dev --webpack -p 3000 --hostname 127.0.0.1",
+    "dev:faculty": "cd apps/faculty-web && NEXT_BUILD_DIR=.next-local ../../node_modules/.bin/next dev --webpack -p 3001 --hostname 127.0.0.1",
+    "build:student": "cd apps/student-web && ../../node_modules/.bin/next build --webpack",
+    "build:faculty": "cd apps/faculty-web && ../../node_modules/.bin/next build --webpack",
+    "build": "npm run build:student && npm run build:faculty",
+    "lint:student": "cd apps/student-web && ../../node_modules/.bin/eslint src --config eslint.config.mjs",
+    "lint:faculty": "cd apps/faculty-web && ../../node_modules/.bin/eslint src --config eslint.config.mjs",
+    "lint": "npm run lint:student && npm run lint:faculty && npm run lint:shared",
+    "test:backend": "cd backend && ../.venv/bin/pytest -v",
+    "start:local": "./start_local.sh",
+    "lint:shared": "node_modules/.bin/eslint packages/shared/src --config eslint.config.mjs",
+    "test:e2e": ".venv/bin/python tests/e2e/candidate_flow.py",
+    "test:e2e:real": ".venv/bin/python tests/e2e/candidate_flow.py --real-providers",
+    "test:e2e:full": ".venv/bin/python tests/e2e/candidate_flow.py --full-duration"
+  }
+}

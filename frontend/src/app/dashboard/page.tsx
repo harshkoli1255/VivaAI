@@ -2,24 +2,18 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store';
-import { dashboardApi, configsApi } from '@/lib/api';
+import { dashboardApi } from '@/lib/api';
+import { Badge } from '@/components/ui/Badge';
 import {
-  LayoutDashboard,
   Search,
-  Filter,
   Download,
   ShieldCheck,
   Award,
   AlertTriangle,
-  Clock,
   ArrowRight,
   User,
-  CheckCircle2,
-  Sliders,
-  ChevronRight,
-  ExternalLink,
+  Plus,
 } from 'lucide-react';
 
 interface CandidateSession {
@@ -37,75 +31,58 @@ interface CandidateSession {
   has_override: boolean;
 }
 
-const MOCK_SESSIONS: CandidateSession[] = [
-  {
-    id: '00000000-0000-0000-0000-000000000021',
-    student_id: 'STU001',
-    student_name: 'Alex Chen',
-    course_code: 'CS401',
-    course_title: 'Distributed Systems & Database Internals',
-    status: 'scored',
-    score: 84,
-    grade_label: 'Distinction (A+)',
-    integrity_score: 99.2,
-    completed_at: '2026-10-18T14:30:00Z',
-    turn_count: 14,
-    has_override: false,
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000022',
-    student_id: 'STU002',
-    student_name: 'Samira Khan',
-    course_code: 'CS401',
-    course_title: 'Distributed Systems & Database Internals',
-    status: 'scored',
-    score: 72,
-    grade_label: 'Merit (B+)',
-    integrity_score: 98.4,
-    completed_at: '2026-10-18T11:15:00Z',
-    turn_count: 12,
-    has_override: true,
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000023',
-    student_id: 'STU003',
-    student_name: 'Marcus Vance',
-    course_code: 'CS302',
-    course_title: 'Operating Systems & Concurrency',
-    status: 'flagged',
-    score: 58,
-    grade_label: 'Pass (C)',
-    integrity_score: 84.1,
-    completed_at: '2026-10-17T16:45:00Z',
-    turn_count: 10,
-    has_override: false,
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000024',
-    student_id: 'STU004',
-    student_name: 'Elena Rostova',
-    course_code: 'CS401',
-    course_title: 'Distributed Systems & Database Internals',
-    status: 'scored',
-    score: 91,
-    grade_label: 'High Distinction',
-    integrity_score: 99.8,
-    completed_at: '2026-10-17T10:20:00Z',
-    turn_count: 16,
-    has_override: false,
-  },
-];
+function formatSessionDate(dateString: string | null | undefined): string {
+  if (!dateString) return '—';
+  try {
+    const d = new Date(dateString);
+    if (isNaN(d.getTime())) return '—';
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+  } catch {
+    return '—';
+  }
+}
+
+function normalizeSession(raw: Record<string, unknown>): CandidateSession {
+  const rawScore = raw.score ?? raw.overall_score ?? raw.total_score ?? raw.effective_score;
+  const score = typeof rawScore === 'number' ? Math.round(rawScore) : 0;
+
+  let grade_label = (raw.grade_label || raw.grade) as string | undefined;
+  if (!grade_label) {
+    if (score >= 85) grade_label = 'Distinction (A+)';
+    else if (score >= 70) grade_label = 'Merit (B+)';
+    else if (score >= 50) grade_label = 'Pass (C)';
+    else grade_label = 'Pending Review';
+  }
+
+  const rawUser = raw.user as { student_id?: string; name?: string } | undefined;
+  const rawConfig = raw.viva_config as { course_code?: string; title?: string } | undefined;
+
+  return {
+    id: (raw.id as string) || '',
+    student_id: (raw.student_id || raw.student_id_code || raw.student_roll || rawUser?.student_id || '—') as string,
+    student_name: (raw.student_name || raw.candidate_name || rawUser?.name || 'Unknown Candidate') as string,
+    course_code: (raw.course_code || raw.subject || rawConfig?.course_code || '') as string,
+    course_title: (raw.course_title || raw.viva_title || rawConfig?.title || 'Oral Viva') as string,
+    status: ((raw.status as string) || 'completed').toLowerCase(),
+    score: score,
+    grade_label: grade_label,
+    integrity_score: typeof raw.integrity_score === 'number' ? raw.integrity_score : 100,
+    completed_at: ((raw.completed_at || raw.ended_at || raw.created_at || '') as string),
+    turn_count: typeof raw.turn_count === 'number' ? raw.turn_count : (Array.isArray(raw.turns) ? raw.turns.length : 0),
+    has_override: Boolean(raw.has_override || raw.override_score !== undefined || raw.override_score !== null),
+  };
+}
 
 export default function AssessmentDashboardPage() {
-  const router = useRouter();
   const { user, isAuthenticated, setAuth } = useAuthStore();
 
-  const [sessions, setSessions] = useState<CandidateSession[]>(MOCK_SESSIONS);
+  const [sessions, setSessions] = useState<CandidateSession[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [loading, setLoading] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
-  // Auto-switch to faculty mode if user enters dashboard
+  // Auto-switch to faculty mode if unauthenticated or student enters dashboard directly
   useEffect(() => {
     if (!isAuthenticated || user?.role !== 'faculty') {
       const demoFaculty = {
@@ -115,25 +92,23 @@ export default function AssessmentDashboardPage() {
         email: 'priya.sharma@university.edu',
       };
       setAuth('demo_faculty_token_drpriya', demoFaculty);
-      localStorage.setItem('vivaai_token', 'demo_faculty_token_drpriya');
-      localStorage.setItem('vivaai_user', JSON.stringify(demoFaculty));
+
+
     }
   }, [isAuthenticated, user, setAuth]);
 
-  // Load real sessions from backend API
+  // Load real sessions from backend API and normalize
   useEffect(() => {
     async function fetchSessions() {
       try {
-        setLoading(true);
         const res = await dashboardApi.sessions();
         const items = res.data?.items || res.data;
         if (Array.isArray(items) && items.length > 0) {
-          setSessions(items);
+          const normalized = items.map((item) => normalizeSession(item as Record<string, unknown>));
+          setSessions(normalized);
         }
       } catch (err) {
         console.warn('Dashboard fetch notice, using verified sample sessions:', err);
-      } finally {
-        setLoading(false);
       }
     }
     fetchSessions();
@@ -141,36 +116,43 @@ export default function AssessmentDashboardPage() {
 
   const handleExportCsv = async () => {
     try {
-      const res = await dashboardApi.exportCsv();
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', 'VivaAI_Assessment_Registry.csv');
-      document.body.appendChild(link);
-      link.click();
+      setIsExporting(true);
+      const res = await dashboardApi.exportCsv(statusFilter !== 'all' ? statusFilter : undefined);
+      const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `vivaai_assessments_${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
     } catch {
-      // Local CSV generation fallback
-      const headers = ['SessionID', 'StudentID', 'Name', 'Course', 'Score', 'Grade', 'Integrity', 'Date'];
-      const rows = sessions.map(s => [
-        s.id,
+      // Client-side CSV generation fallback
+      const headers = ['Student ID', 'Student Name', 'Course Code', 'Score', 'Grade', 'Integrity', 'Override', 'Completed At'];
+      const rows = sessions.map((s) => [
         s.student_id,
-        `"${s.student_name}"`,
+        s.student_name,
         s.course_code,
-        s.score || '',
-        `"${s.grade_label}"`,
+        s.score ?? '',
+        s.grade_label,
         `${s.integrity_score}%`,
-        s.completed_at
+        s.has_override ? 'Yes' : 'No',
+        s.completed_at,
       ]);
-      const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+      const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
       const encodedUri = encodeURI(csvContent);
       const link = document.createElement('a');
       link.setAttribute('href', encodedUri);
-      link.setAttribute('download', 'VivaAI_Assessment_Registry.csv');
+      link.setAttribute('download', 'vivaai_assessments_export.csv');
       document.body.appendChild(link);
       link.click();
+      link.remove();
+    } finally {
+      setIsExporting(false);
     }
   };
 
+  // Filtered sessions
   const filteredSessions = sessions.filter((s) => {
     const matchesSearch =
       s.student_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -178,252 +160,304 @@ export default function AssessmentDashboardPage() {
       s.course_code.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus =
       statusFilter === 'all' ||
-      (statusFilter === 'flagged' && s.status === 'flagged') ||
-      (statusFilter === 'override' && s.has_override) ||
-      (statusFilter === 'distinction' && (s.score || 0) >= 80);
+      s.status.toLowerCase() === statusFilter.toLowerCase();
     return matchesSearch && matchesStatus;
   });
 
-  const avgScore = Math.round(
-    sessions.reduce((acc, s) => acc + (s.score || 0), 0) / (sessions.length || 1)
-  );
+  // Derived metrics
+  const totalCount = sessions.length;
+  const scoredCount = sessions.filter((s) => s.score !== null).length;
+  const avgScore =
+    scoredCount > 0
+      ? Math.round(
+          sessions.reduce((acc, s) => acc + (s.score || 0), 0) / scoredCount
+        )
+      : 0;
+  const flaggedCount = sessions.filter((s) => s.status === 'flagged').length;
+  const overrideCount = sessions.filter((s) => s.has_override).length;
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-slate-950 text-slate-100 py-10 px-4 sm:px-6">
+    <div className="min-h-[calc(100vh-4rem)] bg-[var(--bg-page)] text-[var(--text-primary)] py-8 sm:py-10 px-4 sm:px-6 lg:px-8 transition-colors">
       <div className="max-w-7xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Examiner Assessment Registry · Cohort Fall 2026</span>
+        {/* Header Strip */}
+        <div className="border-b border-[var(--border-default)] pb-6 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-xs font-semibold text-[var(--primary)] uppercase tracking-wider">
+                Faculty Assessment Board
+              </span>
+              <span className="text-xs text-[var(--text-muted)]">• Permanent Cohort Registry</span>
             </div>
-            <h1 className="text-3xl font-extrabold tracking-tight text-white">
-              Faculty Viva Voce Ledger
+            <h1 className="font-editorial text-2xl sm:text-4xl font-bold tracking-tight text-[var(--text-primary)]">
+              Oral Assessment Registry & Audit Dossiers
             </h1>
-            <p className="text-sm text-slate-400">
-              Auditor: <span className="text-slate-200 font-semibold">{user?.name || 'Dr. Priya Sharma'}</span> · Chief Examination Board
+            <p className="text-xs sm:text-sm text-[var(--text-secondary)] max-w-2xl">
+              Inspect candidate spoken viva recordings, audit citation-backed rubric scores, and exercise sovereign grade override authority.
             </p>
           </div>
 
           <div className="flex items-center gap-3">
             <button
+              type="button"
               onClick={handleExportCsv}
-              className="btn-secondary text-xs py-2.5 px-4 font-semibold flex items-center gap-2"
+              disabled={isExporting}
+              className="btn-outline text-xs px-3.5 flex items-center gap-2 min-h-[44px]"
             >
-              <Download className="w-4 h-4 text-sky-400" />
-              Export CSV Ledger
+              <Download className="w-3.5 h-3.5" />
+              <span>{isExporting ? 'Generating CSV...' : 'Export Audit Ledger'}</span>
             </button>
 
-            <Link
-              href="/faculty/setup"
-              className="btn-primary text-xs py-2.5 px-4 font-semibold flex items-center gap-2"
-            >
-              <Sliders className="w-4 h-4" />
-              New Viva Protocol
+            <Link href="/faculty/setup" className="btn-primary text-xs px-4 flex items-center gap-2 min-h-[44px]">
+              <Plus className="w-3.5 h-3.5" />
+              <span>Configure New Viva</span>
             </Link>
           </div>
         </div>
 
-        {/* Executive Metric Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="premium-card p-5 space-y-2">
-            <div className="flex items-center justify-between text-xs font-medium text-slate-400">
-              <span>Total Candidate Vivas</span>
-              <User className="w-4 h-4 text-sky-400" />
+        {/* Academic Statistics Strip (Not 4 heavy bubble cards!) */}
+        <div className="academic-dossier overflow-hidden">
+          <div className="grid grid-cols-2 md:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-[var(--border-subtle)] bg-[var(--bg-card)]">
+            <div className="p-4 sm:p-5 space-y-1">
+              <div className="flex items-center justify-between text-xs text-[var(--text-muted)]">
+                <span className="font-mono text-[11px] uppercase tracking-wider">Total Candidates</span>
+                <User className="w-4 h-4 text-[var(--primary)]" />
+              </div>
+              <div className="text-2xl sm:text-3xl font-bold font-editorial text-[var(--text-primary)]">
+                {totalCount}
+              </div>
+              <p className="text-[11px] text-[var(--text-muted)]">
+                {scoredCount} completed oral examinations
+              </p>
             </div>
-            <div className="text-2xl font-bold font-mono text-white">
-              {sessions.length}
-            </div>
-            <div className="text-[11px] text-emerald-400 flex items-center gap-1 font-mono">
-              <CheckCircle2 className="w-3 h-3" />
-              100% Deterministic Stop Enforced
-            </div>
-          </div>
 
-          <div className="premium-card p-5 space-y-2">
-            <div className="flex items-center justify-between text-xs font-medium text-slate-400">
-              <span>Cohort Average Score</span>
-              <Award className="w-4 h-4 text-sky-400" />
+            <div className="p-4 sm:p-5 space-y-1">
+              <div className="flex items-center justify-between text-xs text-[var(--text-muted)]">
+                <span className="font-mono text-[11px] uppercase tracking-wider">Cohort Mean Score</span>
+                <Award className="w-4 h-4 text-emerald-700 dark:text-teal-400" />
+              </div>
+              <div className="text-2xl sm:text-3xl font-bold font-editorial text-[var(--text-primary)]">
+                {avgScore} <span className="text-sm font-sans font-normal text-[var(--text-muted)]">/ 100</span>
+              </div>
+              <p className="text-[11px] text-emerald-700 dark:text-teal-400 font-medium">
+                Standard Distribution B+ Merit
+              </p>
             </div>
-            <div className="text-2xl font-bold font-mono text-sky-400">
-              {avgScore} / 100
-            </div>
-            <div className="text-[11px] text-slate-400 font-mono">
-              5-Dimension Normalized Rubric
-            </div>
-          </div>
 
-          <div className="premium-card p-5 space-y-2">
-            <div className="flex items-center justify-between text-xs font-medium text-slate-400">
-              <span>Distinction Rate</span>
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            <div className="p-4 sm:p-5 space-y-1">
+              <div className="flex items-center justify-between text-xs text-[var(--text-muted)]">
+                <span className="font-mono text-[11px] uppercase tracking-wider">Integrity Audits</span>
+                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+              </div>
+              <div className="text-2xl sm:text-3xl font-bold font-editorial text-[var(--text-primary)]">
+                {flaggedCount}
+              </div>
+              <p className="text-[11px] text-[var(--text-muted)]">
+                Flagged for silence or window blur
+              </p>
             </div>
-            <div className="text-2xl font-bold font-mono text-emerald-400">
-              {Math.round((sessions.filter(s => (s.score || 0) >= 80).length / sessions.length) * 100)}%
-            </div>
-            <div className="text-[11px] text-slate-400 font-mono">
-              Grade Score &ge; 80/100
-            </div>
-          </div>
 
-          <div className="premium-card p-5 space-y-2">
-            <div className="flex items-center justify-between text-xs font-medium text-slate-400">
-              <span>Audit Flags & Overrides</span>
-              <AlertTriangle className="w-4 h-4 text-amber-400" />
-            </div>
-            <div className="text-2xl font-bold font-mono text-amber-400">
-              {sessions.filter(s => s.status === 'flagged' || s.has_override).length}
-            </div>
-            <div className="text-[11px] text-amber-400/80 font-mono">
-              Requires Deliberation / Verified
+            <div className="p-4 sm:p-5 space-y-1">
+              <div className="flex items-center justify-between text-xs text-[var(--text-muted)]">
+                <span className="font-mono text-[11px] uppercase tracking-wider">Faculty Overrides</span>
+                <ShieldCheck className="w-4 h-4 text-[var(--primary)]" />
+              </div>
+              <div className="text-2xl sm:text-3xl font-bold font-editorial text-[var(--text-primary)]">
+                {overrideCount}
+              </div>
+              <p className="text-[11px] text-[var(--text-muted)]">
+                Recorded to permanent audit log
+              </p>
             </div>
           </div>
         </div>
 
-        {/* Toolbar: Search & Filters */}
-        <div className="glass-panel p-4 flex flex-col sm:flex-row items-center justify-between gap-4 border border-slate-800">
-          <div className="relative w-full sm:w-80">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+        {/* Search & Filter Toolbar */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3 rounded bg-[var(--bg-card)] border border-[var(--border-default)]">
+          {/* Search Input */}
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
             <input
+              id="dashboard-search"
+              name="search"
               type="text"
-              placeholder="Search candidate, student ID, or course..."
+              placeholder="Search by candidate name, roll number (e.g. STU001), or course..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 font-mono"
+              className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-transparent text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none min-h-[44px]"
             />
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <Filter className="w-4 h-4 text-slate-400 hidden sm:inline" />
-            <div className="flex bg-slate-900 border border-slate-800 rounded-lg p-0.5 text-xs font-medium w-full sm:w-auto overflow-x-auto">
-              {[
-                { key: 'all', label: 'All Candidates' },
-                { key: 'distinction', label: 'Distinctions' },
-                { key: 'flagged', label: 'Flagged' },
-                { key: 'override', label: 'Faculty Override' },
-              ].map((filter) => (
-                <button
-                  key={filter.key}
-                  onClick={() => setStatusFilter(filter.key)}
-                  className={`px-3 py-1.5 rounded-md whitespace-nowrap transition-all ${
-                    statusFilter === filter.key
-                      ? 'bg-sky-500 text-white font-semibold'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  {filter.label}
-                </button>
-              ))}
-            </div>
+          {/* Status Filter Tabs */}
+          <div className="flex items-center gap-1.5 self-start sm:self-auto text-xs">
+            {['all', 'scored', 'flagged'].map((status) => (
+              <button
+                key={status}
+                type="button"
+                onClick={() => setStatusFilter(status)}
+                className={`px-3 py-2 rounded font-medium transition-colors min-h-[40px] ${
+                  statusFilter === status
+                    ? 'bg-[var(--accent-subtle)] text-[var(--primary)] font-bold border border-[var(--border-default)]'
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-muted)]'
+                }`}
+              >
+                {status === 'all' ? 'All Cohort' : status === 'scored' ? 'Scored Sessions' : 'Flagged Audits'}
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* High-Density Assessment Table */}
-        <div className="glass-panel overflow-hidden border border-slate-800 shadow-xl">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-900/90 border-b border-slate-800 text-slate-400 font-mono text-[11px] uppercase tracking-wider">
-                <tr>
-                  <th className="py-3.5 px-4 font-semibold">Candidate</th>
-                  <th className="py-3.5 px-4 font-semibold">Module</th>
-                  <th className="py-3.5 px-4 font-semibold">Score / Grade</th>
-                  <th className="py-3.5 px-4 font-semibold">Proctor Confidence</th>
-                  <th className="py-3.5 px-4 font-semibold">Turns</th>
-                  <th className="py-3.5 px-4 font-semibold">Audit Status</th>
-                  <th className="py-3.5 px-4 font-semibold text-right">Dossier</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/80">
-                {filteredSessions.map((session) => (
-                  <tr
-                    key={session.id}
-                    className="hover:bg-slate-900/50 transition-colors group"
-                  >
-                    <td className="py-3.5 px-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-sky-500/10 text-sky-400 flex items-center justify-center font-bold">
-                          {session.student_name[0]}
-                        </div>
-                        <div>
-                          <div className="font-semibold text-white group-hover:text-sky-400 transition-colors">
-                            {session.student_name}
-                          </div>
-                          <div className="text-[11px] font-mono text-slate-400">
-                            {session.student_id}
-                          </div>
-                        </div>
+        {/* Desktop Assessment Registry Table */}
+        <div className="hidden sm:block border border-[var(--border-default)] rounded overflow-x-auto bg-[var(--bg-card)] shadow-xs">
+          <table className="table-academic min-w-[720px] w-full">
+            <thead>
+              <tr>
+                <th>Candidate</th>
+                <th>Course / Module</th>
+                <th>Score & Grade</th>
+                <th>Integrity</th>
+                <th>Spoken Turns</th>
+                <th>Completed</th>
+                <th className="text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredSessions.map((session) => (
+                <tr key={session.id}>
+                  {/* Candidate */}
+                  <td>
+                    <div className="space-y-0.5">
+                      <div className="font-bold text-[var(--text-primary)] flex items-center gap-1.5">
+                        {session.student_name}
+                        {session.has_override && (
+                          <span
+                            title="Faculty override applied"
+                            className="px-1.5 py-0.2 rounded text-[10px] font-mono font-semibold bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800"
+                          >
+                            Override
+                          </span>
+                        )}
                       </div>
-                    </td>
+                      <span className="font-mono text-xs text-[var(--text-muted)]">
+                        {session.student_id}
+                      </span>
+                    </div>
+                  </td>
 
-                    <td className="py-3.5 px-4">
-                      <div className="font-mono text-sky-400 font-bold">
+                  {/* Course Module */}
+                  <td>
+                    <div className="space-y-0.5 max-w-xs">
+                      <span className="font-mono text-xs font-bold text-[var(--primary)]">
                         {session.course_code}
-                      </div>
-                      <div className="text-slate-400 text-[11px] max-w-xs truncate">
+                      </span>
+                      <p className="text-xs text-[var(--text-secondary)] truncate">
                         {session.course_title}
-                      </div>
-                    </td>
+                      </p>
+                    </div>
+                  </td>
 
-                    <td className="py-3.5 px-4 font-mono">
-                      <div className="text-sm font-bold text-white">
-                        {session.score !== null ? `${session.score}/100` : 'Pending'}
-                      </div>
-                      <div className="text-[10px] text-slate-400">
+                  {/* Score & Grade */}
+                  <td>
+                    <div className="space-y-0.5">
+                      <span className="font-bold text-sm text-[var(--text-primary)]">
+                        {session.score !== null ? `${session.score} / 100` : 'Pending'}
+                      </span>
+                      <div className="text-xs text-[var(--text-muted)]">
                         {session.grade_label}
                       </div>
-                    </td>
+                    </div>
+                  </td>
 
-                    <td className="py-3.5 px-4">
-                      <div className="flex items-center gap-2">
-                        <div className="w-16 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full ${
-                              session.integrity_score > 90 ? 'bg-emerald-400' : 'bg-amber-400'
-                            }`}
-                            style={{ width: `${session.integrity_score}%` }}
-                          />
-                        </div>
-                        <span className="font-mono text-[11px] text-slate-300">
-                          {session.integrity_score}%
-                        </span>
-                      </div>
-                    </td>
+                  {/* Integrity Audit */}
+                  <td>
+                    <Badge variant={session.status === 'flagged' ? 'warning' : 'success'} dot>
+                      {session.integrity_score}% Integrity
+                    </Badge>
+                  </td>
 
-                    <td className="py-3.5 px-4 font-mono text-slate-300">
+                  {/* Oral Turns */}
+                  <td>
+                    <span className="font-mono text-xs text-[var(--text-secondary)]">
                       {session.turn_count} turns
-                    </td>
+                    </span>
+                  </td>
 
-                    <td className="py-3.5 px-4">
-                      {session.has_override ? (
-                        <span className="status-pill status-pill-warning text-[10px]">
-                          OVERRIDDEN
-                        </span>
-                      ) : session.status === 'flagged' ? (
-                        <span className="status-pill status-pill-danger text-[10px]">
-                          AUDIT FLAGGED
-                        </span>
-                      ) : (
-                        <span className="status-pill status-pill-success text-[10px]">
-                          VERIFIED
-                        </span>
-                      )}
-                    </td>
+                  {/* Date (Deterministic UTC Formatting - No Hydration Mismatch) */}
+                  <td>
+                    <span className="text-xs text-[var(--text-muted)] font-mono">
+                      {formatSessionDate(session.completed_at)}
+                    </span>
+                  </td>
 
-                    <td className="py-3.5 px-4 text-right">
-                      <Link
-                        href={`/faculty/review/${session.id}`}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-sky-500 hover:text-white text-slate-200 transition-all font-semibold text-xs border border-slate-700"
-                      >
-                        <span>Review</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                  {/* Review Dossier Link */}
+                  <td className="text-right">
+                    <Link
+                      href={`/faculty/review/${session.id}`}
+                      className="btn-secondary text-xs px-3 inline-flex items-center gap-1 min-h-[38px]"
+                    >
+                      <span>Review Dossier</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+
+              {filteredSessions.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="py-12 text-center text-xs text-[var(--text-muted)]">
+                    No candidate oral sessions match your search criteria.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Mobile Viewport Card List (Prevents Horizontal Table Blowout) */}
+        <div className="sm:hidden space-y-3">
+          {filteredSessions.map((session) => (
+            <div key={session.id} className="academic-dossier p-4 space-y-3">
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="font-bold text-sm text-[var(--text-primary)] flex items-center gap-1.5">
+                    {session.student_name}
+                    {session.has_override && (
+                      <span className="px-1 py-0.2 rounded text-[10px] font-mono font-semibold bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                        Override
+                      </span>
+                    )}
+                  </div>
+                  <span className="font-mono text-xs text-[var(--text-muted)]">
+                    ID: {session.student_id} • {session.course_code}
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="font-bold text-sm text-[var(--text-primary)] block">
+                    {session.score !== null ? `${session.score}/100` : 'Pending'}
+                  </span>
+                  <span className="text-[11px] text-[var(--text-muted)]">
+                    {session.grade_label}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-xs pt-2 border-t border-[var(--border-subtle)]">
+                <Badge variant={session.status === 'flagged' ? 'warning' : 'success'} dot>
+                  {session.integrity_score}% Integrity
+                </Badge>
+                <span className="font-mono text-[11px] text-[var(--text-muted)]">
+                  {session.turn_count} oral turns
+                </span>
+              </div>
+
+              <Link
+                href={`/faculty/review/${session.id}`}
+                className="btn-secondary w-full justify-center text-xs mt-2"
+              >
+                Review Dossier & Audio
+                <ArrowRight className="w-3.5 h-3.5 ml-1" />
+              </Link>
+            </div>
+          ))}
         </div>
       </div>
     </div>

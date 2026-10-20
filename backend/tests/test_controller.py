@@ -75,6 +75,33 @@ class TestPhaseTransitions:
         ctrl.tick(31.0)
         assert ctrl.state.phase == Phase.fundamentals
 
+    def test_phase_transition_deferred_when_student_is_speaking(self):
+        ctrl = make_controller()
+        assert ctrl.state.phase == Phase.warm_up
+        # Student began speaking at t=55s
+        ctrl.state.student_speaking_since = 55.0
+        # Tick at boundary t=61s
+        decision = ctrl.tick(61.0)
+        assert decision is None
+        assert ctrl.state.phase == Phase.warm_up
+
+    def test_missing_vad_end_cannot_hold_a_phase_past_answer_limit(self):
+        ctrl = make_controller()
+        ctrl.state.student_speaking_since = 55.0
+        assert ctrl.tick(61.0) is None
+        decision = ctrl.tick(145.0)
+        assert decision.action == 'end_phase'
+        assert ctrl.state.phase == Phase.fundamentals
+        assert ctrl.state.student_speaking_since is None
+
+    def test_long_live_answer_redirects_within_same_phase(self):
+        ctrl = make_controller(elapsed=100.0)
+        ctrl.state.phase = Phase.fundamentals
+        ctrl.state.student_speaking_since = 100.0
+        decision = ctrl.tick(190.0)
+        assert decision.action == 'redirect'
+        assert ctrl.state.student_speaking_since is None
+
 
 class TestPolicyDecisions:
 
@@ -95,7 +122,7 @@ class TestPolicyDecisions:
         ctrl = make_controller()
         clf = ClassificationResult(label=ControllerLabel.partial, confidence=0.7)
         ctrl.on_student_answer("first", clf, 30.0, 20.0)  # hint given
-        decision = ctrl.on_student_answer("second", clf, 60.0, 20.0)
+        decision = ctrl.on_student_answer("second", clf, 55.0, 20.0)
         assert decision.action == "move_on"
         assert ctrl.state.hint_given is False  # reset
 
@@ -149,6 +176,16 @@ class TestSilenceDetection:
         decision = ctrl.tick(22.0)  # only 12s silence
         assert decision is None or decision.action != "prompt_silence"
 
+    def test_silence_prompt_disabled_when_student_is_speaking(self):
+        ctrl = make_controller()
+        ctrl.state.last_student_turn_at = 10.0
+        # Student is actively answering
+        ctrl.state.student_speaking_since = 25.0
+        # Tick at t=35s (25s since last turn, but student is speaking)
+        decision = ctrl.tick(35.0)
+        assert decision is None or decision.action != "prompt_silence"
+        assert ctrl.state.long_silence_count == 0
+
 
 class TestStateSnapshot:
 
@@ -175,3 +212,40 @@ class TestTabSwitch:
         ctrl.on_tab_switch()
         ctrl.on_tab_switch()
         assert ctrl.state.tab_switch_count == 2
+
+    def test_tab_switch_records_correlated_proctoring_event(self):
+        ctrl = make_controller()
+        event = ctrl.on_tab_switch(elapsed_secs=45.2, question_id="q1", question_text="Coffman conditions")
+        assert event["event_type"] == "tab_switch"
+        assert event["timestamp_secs"] == 45.2
+        assert event["question_id"] == "q1"
+        assert event["question_text"] == "Coffman conditions"
+        assert len(ctrl.state.proctoring_events) == 1
+
+    def test_silence_records_correlated_proctoring_event(self):
+        ctrl = make_controller()
+        ctrl.state.last_student_turn_at = 10.0
+        ctrl.state.current_question_id = "q2"
+        ctrl.tick(30.0)  # > 15s silence
+        assert len(ctrl.state.proctoring_events) == 1
+        assert ctrl.state.proctoring_events[0]["event_type"] == "long_silence"
+        assert ctrl.state.proctoring_events[0]["timestamp_secs"] == 30.0
+        assert ctrl.state.proctoring_events[0]["question_id"] == "q2"
+
+
+class TestDynamicProgression:
+
+    def test_strong_answer_probing_follow_up_then_advances(self):
+        ctrl = make_controller()
+        clf = ClassificationResult(label=ControllerLabel.strong, confidence=0.95)
+
+        # 1st strong answer -> probing follow-up
+        decision1 = ctrl.on_student_answer("precise answer", clf, 30.0, 20.0)
+        assert decision1.action == "ask_follow_up"
+        assert ctrl.state.follow_up_count == 1
+
+        # 2nd strong answer on the follow-up -> move on to next topic
+        decision2 = ctrl.on_student_answer("in-depth response to follow-up", clf, 55.0, 25.0)
+        assert decision2.action == "move_on"
+        assert ctrl.state.follow_up_count == 0
+        assert decision2.message is not None
