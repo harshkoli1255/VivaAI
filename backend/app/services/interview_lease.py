@@ -14,33 +14,38 @@ async def interview_lease(session_id, websocket):
     client = lock = heartbeat = None
     acquired = False
     try:
-        if settings.IS_PRODUCTION:
-            from redis.asyncio import Redis
-            client = Redis.from_url(settings.REDIS_URL, socket_connect_timeout=2, socket_timeout=2)
-            lock = client.lock(f"vivaai:interview:{session_id}", timeout=60, blocking=False)
+        has_remote_redis = (
+            bool(settings.REDIS_URL)
+            and not settings.REDIS_URL.startswith("redis://localhost")
+            and not settings.REDIS_URL.startswith("redis://127.0.0.1")
+        )
+        if settings.IS_PRODUCTION and has_remote_redis:
             try:
+                from redis.asyncio import Redis
+                client = Redis.from_url(settings.REDIS_URL, socket_connect_timeout=2, socket_timeout=2)
+                lock = client.lock(f"vivaai:interview:{session_id}", timeout=60, blocking=False)
                 acquired = await lock.acquire()
-            except Exception:
-                logger.exception("Interview connection lease unavailable")
-                await websocket.close(code=4410, reason="Connection service unavailable. Please retry shortly.")
-                yield False
-                return
-            if acquired:
-                async def renew():
-                    try:
-                        while True:
-                            await asyncio.sleep(20)
-                            await lock.extend(60, replace_ttl=True)
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception:
-                        logger.exception("Interview connection lease lost")
-                        await websocket.close(code=4410, reason="Connection interrupted. Please reconnect.")
-                heartbeat = asyncio.create_task(renew())
-        else:
+                if acquired:
+                    async def renew():
+                        try:
+                            while True:
+                                await asyncio.sleep(20)
+                                await lock.extend(60, replace_ttl=True)
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:
+                            logger.exception("Interview connection lease lost")
+                            await websocket.close(code=4410, reason="Connection interrupted. Please reconnect.")
+                    heartbeat = asyncio.create_task(renew())
+            except Exception as e:
+                logger.warning(f"Remote Redis lease unavailable ({e}), falling back to local memory lease")
+                acquired = False
+
+        if not acquired and not lock:
             acquired = session_id not in _local_sessions
             if acquired:
                 _local_sessions.add(session_id)
+
         if not acquired:
             await websocket.close(code=4409, reason="This interview is already open. Close the other tab and retry.")
         yield acquired
