@@ -34,7 +34,7 @@ async def reset_production():
         print("   All tables truncated successfully.")
 
     async with AsyncSessionLocal() as session:
-        print("\n2. Creating faculty user: harshkoli...")
+        print("\n2. Creating faculty and dummy users...")
         faculty_id = uuid.UUID("11111111-1111-1111-1111-111111111111")
         hashed = hash_password("harshkoli1582")
         faculty = User(
@@ -48,8 +48,61 @@ async def reset_production():
             created_at=datetime.now(timezone.utc),
         )
         session.add(faculty)
+
+        # Dummy Faculty: Prof. Priya Sharma & Demo Faculty
+        demo_fac_1 = User(
+            id=uuid.UUID("11111111-1111-1111-1111-111111111112"),
+            student_id="FAC001",
+            email="priya.sharma@university.edu",
+            name="Prof. Priya Sharma",
+            hashed_password=hash_password("faculty123"),
+            role=UserRole.faculty,
+            is_active=True,
+            created_at=datetime.now(timezone.utc),
+        )
+        session.add(demo_fac_1)
+
+        demo_fac_2 = User(
+            id=uuid.UUID("11111111-1111-1111-1111-111111111113"),
+            student_id="faculty",
+            email="faculty@vivaai.edu",
+            name="Demo Faculty",
+            hashed_password=hash_password("faculty123"),
+            role=UserRole.faculty,
+            is_active=True,
+            created_at=datetime.now(timezone.utc),
+        )
+        session.add(demo_fac_2)
+
+        # Dummy Students: Aarav Sharma (STU001) & Demo Student
+        demo_stu_1 = User(
+            id=uuid.UUID("22222222-2222-2222-2222-222222222222"),
+            student_id="STU001",
+            email="aarav.sharma@university.edu",
+            name="Aarav Sharma",
+            hashed_password=hash_password("student123"),
+            role=UserRole.student,
+            is_active=True,
+            created_at=datetime.now(timezone.utc),
+        )
+        session.add(demo_stu_1)
+
+        demo_stu_2 = User(
+            id=uuid.UUID("22222222-2222-2222-2222-222222222223"),
+            student_id="student",
+            email="student@vivaai.edu",
+            name="Demo Student",
+            hashed_password=hash_password("student123"),
+            role=UserRole.student,
+            is_active=True,
+            created_at=datetime.now(timezone.utc),
+        )
+        session.add(demo_stu_2)
+
         await session.flush()
-        print(f"   Faculty created: ID={faculty.id}, Username={faculty.email}, Role={faculty.role.value}")
+        print(f"   Faculty created: Harsh Koli ({faculty.email})")
+        print(f"   Dummy Faculty created: Prof. Priya Sharma (priya.sharma@university.edu) & Demo Faculty (faculty@vivaai.edu)")
+        print(f"   Dummy Students created: Aarav Sharma (STU001) & Demo Student (student / student@vivaai.edu)")
 
         print("\n3. Creating production VivaConfig...")
         config_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -158,11 +211,21 @@ async def reset_production():
             print(f"   {t}: {cnt.scalar()} rows")
 
     async with AsyncSessionLocal() as session:
-        res = await session.execute(select(User).where(User.email == "harshkoli"))
-        u = res.scalar_one_or_none()
-        assert u is not None, "Faculty user not found!"
-        assert verify_password("harshkoli1582", u.hashed_password), "Password verification failed!"
-        print(f"\n   Faculty verification passed: {u.name} ({u.email}), role: {u.role.value}")
+        for ident, pwd, expected_role in [
+            ("harshkoli", "harshkoli1582", "faculty"),
+            ("priya.sharma@university.edu", "faculty123", "faculty"),
+            ("faculty@vivaai.edu", "faculty123", "faculty"),
+            ("STU001", "student123", "student"),
+            ("student", "student123", "student"),
+        ]:
+            res = await session.execute(
+                select(User).where((User.email == ident) | (User.student_id == ident))
+            )
+            u = res.scalar_one_or_none()
+            assert u is not None, f"User {ident} not found!"
+            assert verify_password(pwd, u.hashed_password), f"Password verification failed for {ident}!"
+            assert u.role.value == expected_role, f"Role mismatch for {ident}!"
+            print(f"   Verification passed: {u.name} (ident: {ident}), role: {u.role.value}")
 
     print("\nDATABASE PURGE & SETUP COMPLETE! Production ready.")
 

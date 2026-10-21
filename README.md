@@ -167,13 +167,38 @@ npm run lint           # Lints both student and faculty applications
 npm run test:backend   # Runs full backend pytest regression suite
 ```
 
-### 3. Demonstration Personas
+### 3. Dummy & Demonstration User Accounts
 
-| Role | Identifier / Email | Password | Access Rights |
-|---|---|---|---|
-| **Faculty** | `priya.sharma@university.edu` | `faculty123` | Setup vivas, view all scores, audit transcripts, commit mark overrides, export CSV |
-| **Student** | Student ID: `STU001` | `student123` | Take viva, mic check, review personal submissions |
+Pre-seeded dummy user accounts are available out-of-the-box for evaluating both portals without manual registration:
 
+#### 🎓 Student Examination Portal (`http://localhost:3000`)
+
+| User Persona | Login Identifier (University ID / Email) | Password | Role | Description & Capabilities |
+|---|---|---|---|---|
+| **Demo Student (Primary)** | `STU001` *(or `aarav.sharma@university.edu`)* | `student123` | `student` | Candidate persona (Aarav Sharma) with mic check calibration, oral viva session, live speech transcription, and assessment feedback review. |
+| **Demo Student (Generic)** | `student` *(or `student@vivaai.edu`)* | `student123` | `student` | Generic test student account for instant candidate session verification. |
+| **Demo Student 2** | `STU002` *(or `diya.patel@university.edu`)* | `student123` | `student` | Secondary student persona (Diya Patel) for multiple student test runs. |
+
+> [!TIP]
+> **Custom Student Registration:** Students can also click **"New student? Create an account"** directly on [`http://localhost:3000/login`](http://localhost:3000/login) to register an individual account with their own name and University ID.
+
+---
+
+#### 🏛️ Faculty Assessment Portal (`http://localhost:3001`)
+
+| User Persona | Login Email | Password | Role | Description & Capabilities |
+|---|---|---|---|---|
+| **Demo Faculty (Primary)** | `priya.sharma@university.edu` | `faculty123` | `faculty` | Lead examiner persona (Prof. Priya Sharma). Access to viva configuration, question bank management, cohort evaluation dashboard, 3D acoustic topology visualizer, timestamped audio scrubber, sovereign mark overrides, and CSV gradebook exports. |
+| **Demo Faculty (Generic)** | `faculty@vivaai.edu` | `faculty123` | `faculty` | Generic test faculty persona for rapid assessment and review testing. |
+| **Admin Faculty** | `harshkoli@university.edu` *(or `harshkoli`)* | `harshkoli1582` | `faculty` | Administrator faculty persona (Harsh Koli) with comprehensive reviewer privileges and initial syllabus creation. |
+
+> [!NOTE]
+> **Database Seeding & Reset:**
+> - In development (`./start_local.sh`), dummy accounts are automatically verified and seeded on startup.
+> - To completely reset the database and re-seed all dummy credentials, questions, and configs, run:
+>   ```bash
+>   ./.venv/bin/python backend/scripts/reset_production_db.py
+>   ```
 ---
 
 ## Production Deployment (Docker Compose)

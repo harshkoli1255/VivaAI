@@ -67,16 +67,31 @@ async def init_db():
                 faculty.role = UserRole.faculty
                 faculty.is_active = True
 
-            # In test environment only, also seed test fixture personas used by unit/integration tests
-            if settings.APP_ENV == "test":
+            # Seed demo/dummy personas for development and test environments
+            if not settings.IS_PRODUCTION or settings.APP_ENV in ("test", "development"):
                 res_demo_fac = await session.execute(
                     select(User).where(User.email == "priya.sharma@university.edu")
                 )
                 if not res_demo_fac.scalar_one_or_none():
                     session.add(User(
                         id=uuid.UUID("11111111-1111-1111-1111-111111111112"),
+                        student_id="FAC001",
                         email="priya.sharma@university.edu",
                         name="Prof. Priya Sharma",
+                        hashed_password=hash_password("faculty123"),
+                        role=UserRole.faculty,
+                        is_active=True,
+                    ))
+
+                res_generic_fac = await session.execute(
+                    select(User).where(User.email == "faculty@vivaai.edu")
+                )
+                if not res_generic_fac.scalar_one_or_none():
+                    session.add(User(
+                        id=uuid.UUID("11111111-1111-1111-1111-111111111113"),
+                        student_id="faculty",
+                        email="faculty@vivaai.edu",
+                        name="Demo Faculty",
                         hashed_password=hash_password("faculty123"),
                         role=UserRole.faculty,
                         is_active=True,
@@ -89,6 +104,18 @@ async def init_db():
                         student_id="STU001",
                         email="aarav.sharma@university.edu",
                         name="Aarav Sharma",
+                        hashed_password=hash_password("student123"),
+                        role=UserRole.student,
+                        is_active=True,
+                    ))
+
+                res_generic_stu = await session.execute(select(User).where(User.student_id == "student"))
+                if not res_generic_stu.scalar_one_or_none():
+                    session.add(User(
+                        id=uuid.UUID("22222222-2222-2222-2222-222222222223"),
+                        student_id="student",
+                        email="student@vivaai.edu",
+                        name="Demo Student",
                         hashed_password=hash_password("student123"),
                         role=UserRole.student,
                         is_active=True,
