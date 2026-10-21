@@ -42,11 +42,8 @@ async def init_db():
             audio_columns = await conn.run_sync(lambda sync: {column["name"] for column in inspect(sync).get_columns("audio_chunks")})
             if "recording_kind" not in audio_columns:
                 await conn.execute(text("ALTER TABLE audio_chunks ADD COLUMN recording_kind VARCHAR(32) NOT NULL DEFAULT 'candidate'"))
-            try:
-                from sqlalchemy import text
+            if "proctoring_events" not in session_columns:
                 await conn.execute(text("ALTER TABLE viva_sessions ADD COLUMN proctoring_events JSON DEFAULT '[]'"))
-            except Exception:
-                pass  # column already exists in table
 
         async with AsyncSessionLocal() as session:
             # Check if faculty user already exists
@@ -210,6 +207,7 @@ async def init_db():
                 logger.info("Database schema and core configurations verified.")
     except Exception as e:
         logger.error(f"Error during database initialization: {e}", exc_info=True)
+        raise
 
 
 async def purge_dummy_data():
