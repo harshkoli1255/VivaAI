@@ -1,4 +1,6 @@
 """Small real-provider contract probes, not a faculty-labelled validity benchmark."""
+import argparse
+import statistics
 import asyncio
 import json
 import sys
@@ -12,7 +14,7 @@ from app.services.llm_provider import get_llm_provider
 from app.services.scorer import score_session
 
 
-async def main():
+async def main(args):
     assert not settings.MOCK_MODE and settings.LLM_PROVIDER != 'mock'
     llm = get_llm_provider()
     concise = await classify_answer('What does mutex mean?', 'Mutual exclusion.', llm)
@@ -47,17 +49,28 @@ async def main():
     for dimension in weights:
         assert supported[f'{dimension}_turn_ids']
         assert all(index in (1, 3, 5, 7, 9) for index in supported[f'{dimension}_turn_ids'])
+    repeated_scores = [supported['total_score']]
+    for _ in range(args.consistency_runs - 1):
+        repeated = await score_session('synthetic-supported-evidence', supported_turns, weights, llm, model_name=settings.LLM_STRONG_MODEL)
+        assert not repeated['needs_faculty_review'], repeated
+        repeated_scores.append(repeated['total_score'])
+    assert len(supported['feedback_turn_ids']) == len(supported['feedback_lines'])
+    assert all(ids and all(index in (1, 3, 5, 7, 9) for index in ids) for ids in supported['feedback_turn_ids'])
     result = {'passed': True, 'mock_mode': False, 'model': settings.LLM_STRONG_MODEL,
               'concise_correct_answer': {'label': concise.label.value, 'confidence': concise.confidence},
-              'supported_evidence': {'score': supported['total_score'], 'review_required': supported['needs_faculty_review']},
+              'supported_evidence': {'score': supported['total_score'], 'review_required': supported['needs_faculty_review'], 'feedback_turn_ids': supported['feedback_turn_ids']},
+              'consistency': {'runs': len(repeated_scores), 'scores': repeated_scores, 'population_variance': statistics.pvariance(repeated_scores)},
               'injected_grading_instructions': {'unpublished_score': grade['total_score'],
                   'review_required': grade['needs_faculty_review'], 'reasons': grade.get('low_confidence_reasons', [])},
               'limitation': 'Synthetic narrow probes. No human speech or faculty-grade agreement claim.'}
-    destination = ROOT / 'test-results/quality-provider-probe.json'
+    destination = Path(args.output)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(result, indent=2))
     print(json.dumps(result), flush=True)
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--output', default=str(ROOT / 'test-results/quality-provider-probe.json'))
+    parser.add_argument('--consistency-runs', type=int, choices=range(1, 11), default=1)
+    asyncio.run(main(parser.parse_args()))

@@ -1,5 +1,5 @@
 /** Browser recording write-ahead log. Delete a fragment only after server acknowledgement. */
-type Fragment = { id: string; sessionId: string; captureId: string; sequence: number; startSecs: number; data: Blob };
+type Fragment = { id: string; sessionId: string; captureId: string; sequence: number; startSecs: number; recordingKind?: "candidate" | "conversation"; data: Blob };
 let database: Promise<IDBDatabase> | null = null;
 function openDatabase() {
   if (!database) database = new Promise<IDBDatabase>((resolve, reject) => {
@@ -47,7 +47,7 @@ export function syncRecording(sessionId: string): Promise<void> {
     const fragments = await pending(sessionId);
     fragments.sort((a, b) => a.startSecs - b.startSecs || a.captureId.localeCompare(b.captureId) || a.sequence - b.sequence);
     for (const fragment of fragments) {
-      const query = new URLSearchParams({ capture_id: fragment.captureId, sequence: String(fragment.sequence), start_secs: String(fragment.startSecs) });
+      const query = new URLSearchParams({ capture_id: fragment.captureId, sequence: String(fragment.sequence), start_secs: String(fragment.startSecs), recording_kind: fragment.recordingKind || "candidate" });
       const response = await fetch(`/api/v1/sessions/${sessionId}/recording/chunks/${fragment.id}?${query}`, {
         method: 'PUT', credentials: 'same-origin', headers: { 'X-VivaAI-Request': '1', 'Content-Type': fragment.data.type || 'audio/webm' },
         body: fragment.data, signal: AbortSignal.timeout(15000),
@@ -70,16 +70,16 @@ export class DurableRecorder {
   private stoppedEvent: Promise<void>;
   private readonly captureId = crypto.randomUUID();
   private stopPromise: Promise<void> | null = null;
-  constructor(stream: MediaStream, private sessionId: string, private startSecs: number, private report: (message: string) => void) {
+  constructor(stream: MediaStream, private sessionId: string, private startSecs: number, private report: (message: string) => void, private recordingKind: "candidate" | "conversation" = "candidate") {
     const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((type) => MediaRecorder.isTypeSupported(type));
-    this.recorder = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+    this.recorder = new MediaRecorder(stream, { ...(type ? { mimeType: type } : {}), audioBitsPerSecond: 32000 });
     this.stoppedEvent = new Promise<void>((resolve) => {
       this.recorder.addEventListener('stop', () => resolve(), { once: true });
     });
     this.recorder.ondataavailable = (event) => {
       if (!event.data.size) return;
       const fragment: Fragment = { id: crypto.randomUUID(), sessionId, captureId: this.captureId,
-        sequence: this.sequence++, startSecs, data: new Blob([event.data], { type: this.recorder.mimeType }) };
+        sequence: this.sequence++, startSecs, recordingKind: this.recordingKind, data: new Blob([event.data], { type: this.recorder.mimeType }) };
       this.writes = this.writes.then(() => write(fragment)).catch((error) => {
         this.persistenceError = error;
         this.report('Recording could not be saved on this device. Please keep this tab open and contact faculty.');

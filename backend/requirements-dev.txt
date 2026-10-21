@@ -1,2 +1,5 @@
 -r requirements.txt
 playwright==1.56.0
+
+# Resource measurements for isolated transport load tests
+psutil==7.2.2

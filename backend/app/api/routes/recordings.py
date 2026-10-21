@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import uuid
 from collections import defaultdict
+from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import Response
 from sqlalchemy import select, func
@@ -32,6 +33,7 @@ async def owned_session(db, session_id, current):
 async def upload_chunk(session_id: uuid.UUID, chunk_id: uuid.UUID, request: Request,
     capture_id: uuid.UUID, sequence: int = Query(ge=0, le=30000),
     start_secs: float = Query(ge=0, le=7200, allow_inf_nan=False),
+    recording_kind: Literal["candidate", "conversation"] = "candidate",
     db=Depends(get_db), current=Depends(get_current_user)):
     await owned_session(db, session_id, current)
     content_type = request.headers.get("content-type", "").split(";")[0]
@@ -48,7 +50,7 @@ async def upload_chunk(session_id: uuid.UUID, chunk_id: uuid.UUID, request: Requ
     existing = await db.get(AudioChunk, chunk_id)
     if existing:
         if (existing.session_id != session_id or existing.capture_id != capture_id or existing.sequence != sequence
-                or existing.digest != digest or existing.start_secs != start_secs):
+                or existing.digest != digest or existing.start_secs != start_secs or existing.recording_kind != recording_kind):
             raise HTTPException(409, "Recording reference already contains different data")
         return {"id": str(chunk_id), "stored": True, "duplicate": True}
     # Serialize the per-session quota check on PostgreSQL.
@@ -57,14 +59,14 @@ async def upload_chunk(session_id: uuid.UUID, chunk_id: uuid.UUID, request: Requ
     if total + len(payload) > settings.MAX_AUDIO_UPLOAD_BYTES:
         raise HTTPException(413, "Session recording exceeds the recording limit")
     db.add(AudioChunk(id=chunk_id, session_id=session_id, capture_id=capture_id, sequence=sequence,
-        start_secs=start_secs, content_type=content_type, digest=digest, data=bytes(payload)))
+        start_secs=start_secs, content_type=content_type, recording_kind=recording_kind, digest=digest, data=bytes(payload)))
     try:
         await db.commit()
     except IntegrityError:
         await db.rollback()
         # A racing retry is successful only when all immutable metadata match.
         existing = await db.get(AudioChunk, chunk_id)
-        if existing and existing.session_id == session_id and existing.digest == digest and existing.capture_id == capture_id and existing.sequence == sequence and existing.start_secs == start_secs:
+        if existing and existing.session_id == session_id and existing.digest == digest and existing.capture_id == capture_id and existing.sequence == sequence and existing.start_secs == start_secs and existing.recording_kind == recording_kind:
             return {"id": str(chunk_id), "stored": True, "duplicate": True}
         raise HTTPException(409, "Recording sequence already exists")
     return {"id": str(chunk_id), "stored": True, "duplicate": False}
@@ -73,13 +75,13 @@ async def upload_chunk(session_id: uuid.UUID, chunk_id: uuid.UUID, request: Requ
 @router.get("/{session_id}/recording")
 async def recording_manifest(session_id: uuid.UUID, db=Depends(get_db), current=Depends(get_current_user)):
     await owned_session(db, session_id, current)
-    rows = (await db.execute(select(AudioChunk.capture_id, AudioChunk.sequence, AudioChunk.start_secs).where(
+    rows = (await db.execute(select(AudioChunk.capture_id, AudioChunk.sequence, AudioChunk.start_secs, AudioChunk.recording_kind).where(
         AudioChunk.session_id == session_id).order_by(AudioChunk.start_secs, AudioChunk.sequence))).all()
     captures = defaultdict(list)
-    for capture, sequence, start in rows:
-        captures[str(capture)].append((sequence, start))
+    for capture, sequence, start, kind in rows:
+        captures[str(capture)].append((sequence, start, kind))
     return {"session_id": str(session_id), "chunk_count": len(rows), "captures": [
-        {"id": capture, "start_secs": parts[0][1], "chunks": len(parts),
+        {"id": capture, "start_secs": parts[0][1], "chunks": len(parts), "recording_kind": parts[0][2],
          "missing_sequences": sorted(set(range(max(p[0] for p in parts) + 1)) - {p[0] for p in parts})}
         for capture, parts in captures.items()]}
 

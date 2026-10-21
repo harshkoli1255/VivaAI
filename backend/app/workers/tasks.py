@@ -78,6 +78,7 @@ async def _score_session_async(session_id: str, claim_token=None):
         turns_data = [
             {
                 "turn_index": t.turn_index,
+                "timestamp_secs": t.timestamp_secs,
                 "speaker": t.speaker,
                 "text": t.text,
                 "answer_label": t.answer_label.value if t.answer_label else None,
@@ -130,7 +131,7 @@ async def _score_session_async(session_id: str, claim_token=None):
             session.review_status = ReviewStatus.pending
             db.add(AuditLog(session_id=session.id, action="scoring_review_required",
                 detail={"reasons": score_data["low_confidence_reasons"], "model": model_name,
-                        "prompt_version": score_data["prompt_version"], "feedback": score_data["feedback_lines"]}))
+                        "prompt_version": score_data["prompt_version"], "feedback": score_data["feedback_lines"], "feedback_turn_ids": score_data.get("feedback_turn_ids", [])}))
             await db.commit()
             return
 
@@ -163,6 +164,7 @@ async def _score_session_async(session_id: str, claim_token=None):
             communication_turn_ids=score_data.get("communication_turn_ids", []),
             total_score=float(score_data.get("total_score", 0.0)),
             feedback_lines=score_data.get("feedback_lines", []),
+            feedback_turn_ids=score_data.get("feedback_turn_ids", []),
             low_confidence_flag=bool(score_data.get("low_confidence_flag", False)),
             low_confidence_reasons=score_data.get("low_confidence_reasons", []),
             model_used=str(score_data.get("model_used", model_name)),
@@ -231,6 +233,8 @@ async def _generate_questions_async(
     questions = result.get("questions", [])
 
     async with AsyncSessionLocal() as db:
+        from app.services.config_versions import guard_question_mutation
+        await guard_question_mutation(db, uuid.UUID(viva_config_id))
         for q in questions[:count]:
             phase_str = q.get("phase", "fundamentals")
             try:

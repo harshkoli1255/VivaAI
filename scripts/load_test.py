@@ -1,7 +1,8 @@
 """
-Load test script for VivaAI interview sessions.
-Simulates synthetic student bots running concurrent viva interactions (50, 100, 150 sessions).
-Measures and prints p50, p95 latencies, error rates, and dropped sessions.
+In-process mock concurrency smoke test (50, 100, 150 tasks).
+Measures controller/classifier/scorer calls without HTTP, WebSockets, audio,
+database writes, or real providers. This does not prove live viva capacity
+or measure end-of-speech to first-audio latency.
 """
 import asyncio
 import time
@@ -24,7 +25,7 @@ except ImportError:
 
 
 async def simulate_bot_session(bot_id: int) -> Dict:
-    """Simulates one complete student viva lifecycle."""
+    """Exercise three canned answers and one mock scoring call."""
     start_time = time.perf_counter()
     latencies: List[float] = []
     dropped = False
@@ -122,7 +123,8 @@ async def run_batch(concurrent_count: int) -> Dict:
 
 async def main():
     print("=" * 70)
-    print("VivaAI Synthetic Bot Load Test (50, 100, 150 Concurrent Sessions)")
+    print("VivaAI In-Process Mock Concurrency Smoke Test (50, 100, 150 Tasks)")
+    print("No network, speech providers, database, or live viva capacity measurement.")
     print("=" * 70)
 
     session_counts = [50, 100, 150]

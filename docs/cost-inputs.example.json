@@ -1,0 +1,18 @@
+{
+  "currency": "USD",
+  "cohort_size": 350,
+  "api": [
+    {"name": "Speech recognition", "unit": "audio minute", "quantity_per_viva": null, "rate_per_unit": null, "rate_source": null, "rate_date": null},
+    {"name": "Examiner speech", "unit": "1000 characters", "quantity_per_viva": null, "rate_per_unit": null, "rate_source": null, "rate_date": null},
+    {"name": "Interviewer input", "unit": "million tokens", "quantity_per_viva": null, "rate_per_unit": null, "rate_source": null, "rate_date": null},
+    {"name": "Interviewer output", "unit": "million tokens", "quantity_per_viva": null, "rate_per_unit": null, "rate_source": null, "rate_date": null},
+    {"name": "Scorer input", "unit": "million tokens", "quantity_per_viva": null, "rate_per_unit": null, "rate_source": null, "rate_date": null},
+    {"name": "Scorer output", "unit": "million tokens", "quantity_per_viva": null, "rate_per_unit": null, "rate_source": null, "rate_date": null},
+    {"name": "Storage, hosting and database allocation", "unit": "viva", "quantity_per_viva": 1, "rate_per_unit": null, "rate_source": null, "rate_date": null}
+  ],
+  "self_hosted": [
+    {"name": "GPU allocation including idle capacity", "unit": "GPU hour", "quantity_per_viva": null, "rate_per_unit": null, "rate_source": null, "rate_date": null},
+    {"name": "CPU and worker allocation", "unit": "CPU hour", "quantity_per_viva": null, "rate_per_unit": null, "rate_source": null, "rate_date": null},
+    {"name": "Storage and database allocation", "unit": "viva", "quantity_per_viva": 1, "rate_per_unit": null, "rate_source": null, "rate_date": null}
+  ]
+}

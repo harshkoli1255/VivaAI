@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-21",
+  "viewport_checks": 37,
+  "tested_widths": [
+    320,
+    390,
+    768,
+    1440
+  ],
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "page_overflow": [],
+  "browser_errors": [],
+  "dropdown_chevron_right_inset_px": 16,
+  "dropdown_text_right_padding_px": 48,
+  "final_checks": {
+    "passed": true,
+    "average_mark": "correctly includes manual marks",
+    "tablet_cards": true,
+    "dropdown_inset": {
+      "appearance": "none",
+      "padding": "48px",
+      "position": "calc(100% - 16px) 50%"
+    },
+    "rubric_320px": "no horizontal overflow"
+  },
+  "production_builds": {
+    "student": "passed",
+    "faculty": "passed"
+  },
+  "targeted_backend_tests": 6,
+  "e2e": "passed",
+  "scope": "Chrome local visual and functional verification; screenshots with assessment data remain in ignored test-results.",
+  "e2e_browser_errors": [],
+  "keyboard_timeline_seeking": "passed",
+  "lint": {
+    "errors": 0,
+    "existing_cross_portal_navigation_warnings": 5
+  }
+}

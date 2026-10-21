@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app.api.router import api_router
-from app.api.routes import websocket_interview
+from app.api.routes import websocket_interview, streaming_speech
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.db.init_db import init_db
@@ -89,6 +89,7 @@ if settings.IS_PRODUCTION:
 
 app.include_router(api_router, prefix="/api/v1")
 app.include_router(websocket_interview.router, prefix="/ws", tags=["websocket"])
+app.include_router(streaming_speech.router, prefix="/ws", tags=["speech"])
 
 
 # ── Liveness & Readiness Probes ───────────────────────────────────────────────

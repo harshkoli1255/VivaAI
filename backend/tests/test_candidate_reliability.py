@@ -232,7 +232,7 @@ async def test_only_one_connection_can_own_a_session():
         assert acquired
 
 
-@pytest.mark.parametrize('duration', [600, 900, 1200, 1800])
+@pytest.mark.parametrize('duration', [60, 600, 900])
 def test_faculty_duration_creates_matching_contiguous_phases(duration):
     from app.api.routes.viva_configs import CreateVivaConfigRequest
     config = CreateVivaConfigRequest(title='Test', subject='Algorithms', total_duration_secs=duration)

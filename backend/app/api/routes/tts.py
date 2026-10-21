@@ -29,6 +29,8 @@ async def synthesize_speech(
 
     provider = get_tts_provider(voice_id=voice)
     provider_name = type(provider).__name__
+    if os.environ.get("VIVAAI_TEST_TONE") == "1":
+        provider_name += "-test-tone"
     hash_key = hashlib.md5(f"{provider_name}_{voice}_{text}".encode("utf-8")).hexdigest()
 
     cached_mp3 = os.path.join(CACHE_DIR, f"{hash_key}.mp3")

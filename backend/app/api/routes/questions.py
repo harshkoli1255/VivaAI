@@ -75,6 +75,9 @@ async def review_question(
     if not question:
         raise HTTPException(404, "Question not found")
 
+    from app.services.config_versions import guard_question_mutation
+    await guard_question_mutation(db, question.viva_config_id)
+
     try:
         question.status = QuestionStatus(req.status)
     except ValueError:
@@ -97,6 +100,9 @@ async def update_question(
     question = result.scalar_one_or_none()
     if not question:
         raise HTTPException(404, "Question not found")
+
+    from app.services.config_versions import guard_question_mutation
+    await guard_question_mutation(db, question.viva_config_id)
 
     if req.text:
         question.text = req.text
@@ -121,6 +127,8 @@ async def delete_question(
     question = result.scalar_one_or_none()
     if not question:
         raise HTTPException(404, "Question not found")
+    from app.services.config_versions import guard_question_mutation
+    await guard_question_mutation(db, question.viva_config_id)
     await db.delete(question)
     await db.commit()
     return {"deleted": True}

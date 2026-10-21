@@ -1,6 +1,6 @@
 """API router — aggregates all route modules."""
 from fastapi import APIRouter
-from app.api.routes import speech_review
+from app.api.routes import speech_review, streaming_speech, calibration
 
 from app.api.routes import recordings, auth, users, viva_configs, questions, sessions, transcript, scores, dashboard, websocket_interview, tts
 
@@ -19,3 +19,7 @@ api_router.include_router(tts.router, prefix="", tags=["tts"])
 
 api_router.include_router(recordings.router, prefix="/sessions", tags=["recordings"])
 api_router.include_router(speech_review.router, prefix="/sessions", tags=["speech"])
+
+api_router.include_router(streaming_speech.router, prefix="/ws", tags=["speech"])
+
+api_router.include_router(calibration.router, prefix="/calibration", tags=["calibration"])

@@ -46,6 +46,8 @@ class SessionResponse(BaseModel):
     ended_at: Optional[datetime]
     total_score: Optional[float]
     review_status: str
+    viva_title: Optional[str] = None
+    subject: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -75,12 +77,10 @@ async def create_session(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid viva config ID")
 
-    config_result = await db.execute(
-        select(VivaConfig).where(VivaConfig.id == config_uuid)
-    )
-    config = config_result.scalar_one_or_none()
-    if not config:
-        raise HTTPException(status_code=404, detail="Viva configuration not found")
+    if current.get("role") != "student":
+        raise HTTPException(status_code=403, detail="Only candidates can create examination sessions")
+    from app.services.config_versions import lock_config
+    config = await lock_config(db, config_uuid)
 
     if not config.is_active:
         raise HTTPException(status_code=409, detail="This examination is no longer available")
@@ -128,6 +128,7 @@ async def my_sessions(
 
     result = await db.execute(
         select(VivaSession)
+        .options(selectinload(VivaSession.viva_config))
         .where(VivaSession.student_id == student_uuid)
         .order_by(VivaSession.created_at.desc())
     )
@@ -145,6 +146,8 @@ async def my_sessions(
             ended_at=s.ended_at,
             total_score=s.total_score,
             review_status=s.review_status.value,
+            viva_title=s.viva_config.title if s.viva_config else None,
+            subject=s.viva_config.subject if s.viva_config else None,
         )
         for s in sessions
     ]
@@ -354,7 +357,10 @@ async def override_score(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    old_score = session.total_score
+    if len(req.reason.strip()) < 5:
+        raise HTTPException(422, "Provide a justification of at least 5 non-whitespace characters")
+
+    old_score = session.override_score if session.override_score is not None else session.total_score
     session.override_score = req.override_score
     session.override_by = uuid.UUID(current["sub"])
     session.override_reason = req.reason.strip()
@@ -552,3 +558,24 @@ async def retry_scoring(session_id: uuid.UUID, db: AsyncSession = Depends(get_db
     db.add(AuditLog(session_id=session_id, actor_id=uuid.UUID(current["sub"]), action="scoring_retry_requested", detail={}))
     await db.commit()
     return {"status": "queued"}
+
+
+class RetentionHoldRequest(BaseModel):
+    hold: bool
+    reason: str = Field(min_length=5, max_length=1000)
+
+
+@router.post("/{session_id}/retention-hold")
+async def set_retention_hold(session_id: uuid.UUID, req: RetentionHoldRequest,
+        db: AsyncSession = Depends(get_db), current: dict = Depends(require_faculty)):
+    session = await db.scalar(select(VivaSession).where(VivaSession.id == session_id).with_for_update())
+    if not session:
+        raise HTTPException(404, "Session not found")
+    if not req.reason.strip() or len(req.reason.strip()) < 5:
+        raise HTTPException(422, "Explain why the retention hold is changing")
+    old = session.retention_hold
+    session.retention_hold = req.hold
+    db.add(AuditLog(session_id=session_id, actor_id=uuid.UUID(current["sub"]), action="retention_hold_changed",
+                    detail={"previous": old, "hold": req.hold, "reason": req.reason.strip()}))
+    await db.commit()
+    return {"session_id": str(session_id), "retention_hold": session.retention_hold}

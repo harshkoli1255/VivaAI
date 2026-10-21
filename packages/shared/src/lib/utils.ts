@@ -61,8 +61,11 @@ export function downloadBlob(blob: Blob, filename: string) {
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  a.remove();
+  // Let the browser start consuming the object URL before releasing it.
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export function getFacultyPortalUrl(): string {

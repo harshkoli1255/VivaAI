@@ -25,8 +25,8 @@ flowchart TD
     end
 
     subgraph SpeechPipeline ["Swappable Voice Pipeline"]
-        STT["STT Provider\n(Deepgram Streaming / Web Speech / Mock)"]
-        TTS["TTS Provider\n(ElevenLabs / Cartesia / Web Audio / Mock)"]
+        STT["STT Provider\n(Deepgram Live STT / Web Speech / Clip Retry)"]
+        TTS["TTS Provider\n(ElevenLabs / Deepgram / Mock)"]
         FastLLM["Interviewer LLM\n(Claude 3.5 Haiku / GPT-4o-mini / Mock)"]
     end
 
@@ -38,7 +38,7 @@ flowchart TD
 
     subgraph DataStorage ["Persistence Tier"]
         PG[("PostgreSQL 16\n(Sessions, Transcripts, Questions, Overrides)")]
-        MinIO[("MinIO / S3\n(Chunked Audio Streams)")]
+        MinIO[("Database Audio Fragments / Legacy S3")]
     end
 
     UI_Student <-->|Audio & Text WS Stream| WS
@@ -49,7 +49,7 @@ flowchart TD
     WS <--> Classifier
     WS <--> SpeechPipeline
 
-    WS -->|Incremental Audio| MinIO
+    WS -->|Incremental Audio Fragments| PG
     WS -->|Transcript Turns| PG
 
     WS -->|Trigger Scoring| Queue
@@ -66,7 +66,7 @@ flowchart TD
 ## Core Principles
 
 - **Fairness:** Every student receives an identical 15-minute timeline, deterministic phase progression, and objective rubric evaluation.
-- **Auditability:** Every awarded mark is cited against exact transcript turn IDs (`[turn #2, turn #4]`). Faculty overrides permanently log reviewer name, justification, and timestamp in an immutable audit log.
+- **Auditability:** New automated marks require validated transcript evidence; historical unlinked reports remain explicit. Faculty overrides permanently log reviewer name, justification, and timestamp in an application audit log.
 - **Scalability:** Independent scoring workers claim durable database jobs with renewable leases. Candidate recording fragments are stored immutably in the database; each session is capped at 50 MB. Legacy whole-file uploads can still use S3/MinIO.
 - **Zero API Key Mock Mode:** Runs out-of-the-box with synthetic speech, classifier, and scoring providers.
 
@@ -88,7 +88,7 @@ The state machine strictly enforces timing independently of the LLM:
 |---|---|---|
 | **Strong** | `ask_follow_up` | Probes deeper architectural nuance for distinction |
 | **Partial** | `give_hint` | Offers 1 guiding hint before moving forward |
-| **Don't Know** | `move_on` | Polite advance with **zero negative penalty** |
+| **Don't Know** | `move_on` | Polite advance without repeated punitive questioning; marks still reflect demonstrated knowledge |
 | **Off-Topic / >90s** | `redirect` | Courteous redirection back to subject matter |
 
 ---
@@ -130,7 +130,7 @@ flowchart TD
 - **Single-Use WebSocket Tickets:** WebSocket connections require a short-lived ticket (`POST /api/v1/sessions/{id}/ws-ticket`) valid for 60 seconds. Tokens are never exposed in WebSocket URL query strings. Reconnects and cross-candidate hijacking are strictly blocked (4401/4403).
 - **Private Audio Storage:** MinIO/S3 audio buckets are configured with `anonymous set none`. Audio is served exclusively through authenticated presigned URLs (`GET /api/v1/sessions/{id}/audio`).
 - **Object-Level Authorization (IDOR/BOLA):** Candidates are strictly forbidden from accessing other candidates' sessions, audio, transcripts, or score reports. Public registration cannot escalate to `faculty` or `admin`.
-- **Sovereign Score Overrides & Audit Trail:** Overrides must be within 0–100 and require an explicit justification reason. Every override permanently logs reviewer identity, previous score, new score, reason, and UTC timestamp in an immutable `AuditLog`.
+- **Sovereign Score Overrides & Audit Trail:** Overrides must be within 0–100 and require an explicit justification reason. Every override permanently logs reviewer identity, previous score, new score, reason, and UTC timestamp in an application `AuditLog`.
 - **Production Fail-Safe Startup:** In `APP_ENV=production`, the application refuses to boot if `SECRET_KEY` equals `change_me_in_prod` or is under 32 characters, if SQLite fallback is attempted, or if demo persona tokens are used.
 - **Liveness & Readiness Probes:** Kubernetes-compatible health endpoints at `/health/live` (process liveness) and `/health/ready` (tests live database and storage connectivity).
 
@@ -191,7 +191,7 @@ docker compose -f docker-compose.prod.yml up --build -d
 
 ### Production Hardening Highlights:
 - **Unexposed Internal Ports:** PostgreSQL (5432), Redis (6379), and MinIO (9000/9001) ports are not exposed on the host interface.
-- **Pinned Container Images:** All base images use immutable tags (e.g., `postgres:16.4-alpine3.20`, `redis:7.4.0-alpine3.20`, `node:20-alpine`).
+- **Container reproducibility:** Some images currently use moving tags. Pin tested digests before production rollout; a reproducible production image set is not established yet.
 - **Non-Root Execution:** Frontend containers run under an unprivileged `nextjs` system user (`UID 1001`).
 - **Multi-Worker Uvicorn:** Application runs with 4 production workers (`uvicorn ... --workers 4`), with `--reload` disabled.
 - **Private Audio Storage:** Storage bucket initializes with `mc anonymous set none` to prevent unauthorized downloads.
@@ -361,33 +361,29 @@ CREATE TABLE audit_logs (
 
 ---
 
-## Cost Sheet & Economics Template
+## Cost sheet and challenge validation
 
-Estimates based on typical cloud production API rates for a 15-minute technical viva:
+Use [the cost inputs template](docs/cost-inputs.example.json) and
+`scripts/cost_sheet.py` to calculate per-viva and 350-student API/self-hosted
+costs from measured usage and dated provider quotes. Current costs remain
+pending; earlier illustrative prices and savings claims have been removed.
 
-### Cost Per 15-Minute Viva
+The [design document](docs/DESIGN.md), [capacity plan](docs/CAPACITY.md),
+[privacy and retention note](docs/PRIVACY.md), and [benchmark workflow](tests/quality/README.md)
+separate implemented functionality from missing human evidence and production
+measurements. A real local HTTP/WebSocket/audio upload run reached 150 concurrent
+mock-provider bots; its 150-bot p95 was 3087.45 ms, above the 2500 ms target.
+This is not real speech capacity proof. Raw results are in
+[the transport load result](docs/validation/transport-load.json).
 
-| Component | Provider / Model | Units / Consumption | Unit Rate | Cost per Viva |
-|---|---|---|---|---|
-| **Speech-to-Text (STT)** | Deepgram Nova-2 | 15 mins audio | $0.0043 / min | **$0.065** |
-| **Interviewer LLM** | Claude 3.5 Haiku / GPT-4o-mini | ~3,500 input + 1,200 output tokens | $0.25 / M in, $1.25 / M out | **$0.003** |
-| **Text-to-Speech (TTS)** | ElevenLabs / Cartesia | ~1,800 characters spoken | $0.015 / 1k chars | **$0.027** |
-| **Scoring LLM** | Claude 3.5 Sonnet / GPT-4o | ~6,000 input + 900 output tokens | $3.00 / M in, $15.00 / M out | **$0.032** |
-| **Object Storage & Cloud DB** | AWS S3 / MinIO + RDS PostgreSQL | 15 MB audio recording + DB I/O | Standard tiers | **$0.001** |
-| **Total Cost Per Student Viva** | | | | **~$0.128** |
-
-### Cohort Cost for 350 Students
-
-$$\text{Total Cohort Cost} = 350 \times \$0.128 \approx \mathbf{\$44.80}$$
-
-*Comparing against 350 faculty person-hours (~87.5 hours across a 4-professor committee), VivaAI achieves a >98% direct operational savings while maintaining complete faculty review oversight.*
-
----
+To export authorized, consented demo evidence, use `scripts/export_demo_bundle.py`.
+The bundle manifest distinguishes available audio/scores from incomplete
+full-duration evidence. No consented human dataset is included.
 
 ## Privacy & Ethical Compliance Note
 
 - **Recording Consent:** Audio streaming commences only after the student grants affirmative, timestamped consent on the pre-check screen (`viva_sessions.consent_given = true`).
-- **Student Privacy (FERPA & GDPR):** Audio files require authenticated session access; candidates can access their own recordings and authorized faculty can review sessions. Institutional retention and privacy policies must be configured before rollout.
+- **Student privacy:** Audio files require authenticated session access; candidates can access their own recordings and authorized faculty can review sessions. Institutional retention and privacy policies must be configured before rollout.
 - **Fairness & Accent Neutrality:** Grading prompts assess technical evidence and understandable meaning, without penalizing accent, dialect, pace or language mixing. This policy still needs validation with representative human recordings and independent faculty labels.
 - **Academic Sovereignty:** Automated marks serve as faculty assistance. Reviewing professors retain unilateral override capability with recorded audit rationale.
 
@@ -426,7 +422,7 @@ Live cloud speech quality, Safari/Firefox microphone behavior, the Redis connect
 
 The browser writes 250 ms microphone fragments to IndexedDB before upload and deletes each fragment only after an authenticated server acknowledgement. Fragment IDs and capture sequence numbers make retries idempotent. Each page lifetime receives its own capture ID, so reloading cannot overwrite a previous recording. Offline fragments resume uploading after reconnect or the next visit to that interview. Completing an interview waits for the final recorder event and pending uploads; a failed upload remains retryable.
 
-The database stores immutable fragments with a 50 MB per-session limit. Authenticated playback reconstructs each capture using FFmpeg, then places it on the interview timeline with silence across recording gaps. Browser/device shutdown can still interrupt the final fragment before IndexedDB commits it; the application does not claim that audio was stored until it is acknowledged. Candidate microphone audio is recorded; examiner speech remains in the transcript and is not mixed into the microphone recording.
+The database stores immutable fragments with a 50 MB per-session limit. Authenticated playback reconstructs each capture using FFmpeg, then places it on the interview timeline with silence across recording gaps. Browser/device shutdown can still interrupt the final fragment before IndexedDB commits it; the application does not claim that audio was stored until it is acknowledged. New conversation captures mix candidate microphone input and AI audio actually played, including repeats and interruptions. Historical microphone-only captures remain labelled. Typed sessions record AI playback without microphone permission.
 
 A separate socket reader handles deliberate interruption while speech synthesis is running. It cancels the speech task without cancelling the interview, and speech IDs prevent late audio frames from restarting interrupted playback. Voice activity alone does not interrupt a question.
 
@@ -564,3 +560,46 @@ assessment. Clearing a draft also clears its speech receipt, and a damaged
 saved draft cannot crash the interview page.
 
 The final default and real-provider browser reruns both passed, including automatic candidate feedback updates after faculty assessment. Consolidated results are in `test-results/interview-improvements-validation.json`.
+
+## Challenge coverage and submission evidence
+
+See [the PDF comparison](docs/REQUIREMENTS.md) for implemented features, partial
+requirements and missing evidence. Importable example questions and rubric are
+in [samples](samples/README.md). Generate three short scripted persona transcripts
+with `python scripts/persona_probe.py --output docs/validation/scripted-personas.json`.
+The default probe makes no provider calls and tests fixture-driven policy only.
+`python scripts/submission_check.py` inventories files without accessing real data.
+Neither command establishes human grading accuracy or production capacity.
+
+## Live speech, conversation audio and faculty tools
+
+See [streaming and audio](docs/STREAMING.md). The live cloud control shows interim
+text before Stop, lets candidates review/correct it, continues from visible edits,
+and starts fresh after Clear answer. Hindi/mixed speech uses the separately
+configured multilingual model. New recordings capture both candidate input and
+AI playback; MP3 output plays progressively where MediaSource is supported.
+
+Faculty can open **Compare faculty marks** from the dashboard and upload CSV
+columns `session_id,faculty_score`. Comparisons use stored original AI marks and
+never overwrite assessment scores. Mock results are explicitly labelled.
+
+The review page can protect a record from retention deletion with an audited
+reason. `scripts/retention.py` plans by default and is disabled until approved
+`RETENTION_DAYS` and `RETENTION_POLICY_ID` are configured. No real data has been
+deleted; see [privacy and retention](docs/PRIVACY.md) before enabling it.
+
+A three-page submission design is available at `output/pdf/vivaai-design.pdf`,
+reproducible with `python scripts/build_design_pdf.py` after installing the project
+Python dependencies. No human accuracy or production-capacity claim follows from
+these implemented features and synthetic tests.
+
+
+### Viva management and student shortcuts
+
+The faculty dashboard now includes **Your vivas**. Edit details, questions, timing, and rubric through **Edit viva**, then publish a new version. Existing interviews keep their original configuration and question IDs, including reconnects and later scoring. The library also supports pause/reopen enrollment, duplicate, share student links, download a JSON question bank, and review/export sessions for one version. Historical versions remain accessible from **Version history**.
+
+The editor stores an optional working draft in the current browser tab. JSON imports are staged for faculty approval before publication. Concurrent edits are rejected with an actionable conflict message. Students can follow a shared viva link through sign-in, resume saved interviews from readiness, search available vivas/history, and download their assessment report from feedback.
+
+For an existing production database, apply migrations with `cd backend && ../.venv/bin/alembic upgrade head` before starting the updated API. Development initialization adds the new fields to the local preview. No extra API keys or environment settings are needed for these features.
+
+Run the isolated management browser regression with `.venv/bin/python tests/e2e/viva_management.py`. It uses disposable mock data and requires the same Chrome/Playwright setup as the existing candidate browser test. Run browser suites and builds sequentially.

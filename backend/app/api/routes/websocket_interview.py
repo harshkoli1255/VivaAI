@@ -108,8 +108,9 @@ class InterviewSession:
         self._inbox = None
         self._speech_id = None
         self._send_lock = asyncio.Lock()
+        self._turn_lock = asyncio.Lock()
         self.previous_turns = previous_turns or []
-        self.adaptive = AdaptiveQuestions(self.previous_turns, initial_difficulty=difficulty)
+        self.adaptive = AdaptiveQuestions(self.previous_turns, initial_difficulty=difficulty, questions=questions)
         if self.previous_turns:
             self.turn_index = max(t.turn_index for t in self.previous_turns) + 1
             self._asked_ids = {str(t.question_id) for t in self.previous_turns if t.question_id}
@@ -170,6 +171,18 @@ class InterviewSession:
         self._interrupted_event.clear()
         self._current_speak_task = asyncio.current_task()
 
+        # Persist the actual question before announcing it so a simultaneous voice
+        # draft binds to this question, including barge-in during its first audio.
+        saved_turn_id = await self._save_turn("ai", text, question_id=question_id, is_variant=is_variant) if save else None
+
+        async def mark_interrupted():
+            if saved_turn_id:
+                async with AsyncSessionLocal() as db:
+                    turn = await db.get(TranscriptTurn, saved_turn_id)
+                    if turn:
+                        turn.text = f"{text} [Speech interrupted]"
+                        await db.commit()
+
         await self.send_json({
             "type": "ai_speaking",
             "speech_id": self._speech_id,
@@ -193,22 +206,16 @@ class InterviewSession:
 
             if not interrupted and not self._interrupted_event.is_set():
                 await self.send_json({"type": "ai_done_speaking", "speech_id": self._speech_id, "elapsed": self.elapsed()})
-                if save:
-                    await self._save_turn("ai", text, question_id=question_id, is_variant=is_variant)
             else:
                 await self.send_json({"type": "ai_interrupted", "speech_id": self._speech_id, "elapsed": self.elapsed()})
-                if save:
-                    await self._save_turn("ai", f"{text} [Speech interrupted]", question_id=question_id, is_variant=is_variant)
+                await mark_interrupted()
         except asyncio.CancelledError:
             await self.send_json({"type": "ai_interrupted", "speech_id": self._speech_id, "elapsed": self.elapsed()})
-            if save:
-                await self._save_turn("ai", f"{text} [Speech interrupted]", question_id=question_id, is_variant=is_variant)
+            await mark_interrupted()
             raise
         except Exception as e:
             logger.error(f"TTS streaming failed: {e}")
             await self.send_json({"type": "ai_done_speaking", "speech_id": self._speech_id, "elapsed": self.elapsed()})
-            if save:
-                await self._save_turn("ai", text, question_id=question_id, is_variant=is_variant)
         finally:
             self.is_ai_speaking = False
             self._current_speak_task = None
@@ -226,44 +233,50 @@ class InterviewSession:
         answer_metadata: Optional[dict] = None,
         stt_words: Optional[list] = None,
     ):
-        async with AsyncSessionLocal() as db:
-            turn = TranscriptTurn(
-                id=turn_id or uuid.uuid4(),
-                session_id=self.db_session_id,
-                turn_index=self.turn_index,
-                speaker=speaker,
-                text=text,
-                timestamp_secs=self.elapsed(),
-                duration_secs=duration_secs,
-                phase=VivaPhase(self.controller.state.phase.value)
-                if self.controller.state.phase.value in [p.value for p in VivaPhase]
-                else VivaPhase.warm_up,
-                question_id=uuid.UUID(question_id) if question_id else None,
-                is_variant=is_variant,
-                answer_label=AnswerLabel(answer_label) if answer_label else None,
-                stt_confidence=stt_confidence,
-                answer_metadata=answer_metadata,
-                stt_words=stt_words,
-            )
-            db.add(turn)
-            # Update session state
-            sess_r = await db.execute(
-                select(VivaSession).where(VivaSession.id == self.db_session_id)
-            )
-            sess = sess_r.scalar_one_or_none()
-            if sess:
-                sess.elapsed_secs = int(self.elapsed())
-                sess.current_phase = turn.phase
-            await db.commit()
-        self.turn_index += 1
-        return turn.id
+        # AI playback and candidate input can persist concurrently. Allocate
+        # each evidence index under one lock, including its database commit.
+        async with self._turn_lock:
+            async with AsyncSessionLocal() as db:
+                turn = TranscriptTurn(
+                    id=turn_id or uuid.uuid4(),
+                    session_id=self.db_session_id,
+                    turn_index=self.turn_index,
+                    speaker=speaker,
+                    text=text,
+                    timestamp_secs=self.elapsed(),
+                    duration_secs=duration_secs,
+                    phase=VivaPhase(self.controller.state.phase.value)
+                    if self.controller.state.phase.value in [p.value for p in VivaPhase]
+                    else VivaPhase.warm_up,
+                    question_id=uuid.UUID(question_id) if question_id else None,
+                    is_variant=is_variant,
+                    answer_label=AnswerLabel(answer_label) if answer_label else None,
+                    stt_confidence=stt_confidence,
+                    answer_metadata=answer_metadata,
+                    stt_words=stt_words,
+                )
+                db.add(turn)
+                # Update session state
+                sess_r = await db.execute(
+                    select(VivaSession).where(VivaSession.id == self.db_session_id)
+                )
+                sess = sess_r.scalar_one_or_none()
+                if sess:
+                    sess.elapsed_secs = int(self.elapsed())
+                    sess.current_phase = turn.phase
+                await db.commit()
+            self.turn_index += 1
+            return turn.id
 
     def _get_next_question(self, phase_str: str) -> Optional[dict]:
         questions = self._questions_by_phase.get(phase_str, [])
-        return self.adaptive.choose(questions, self._asked_ids)
+        return self.adaptive.choose(questions, self._asked_ids,
+                                    preferred_topic=self.adaptive.strongest_topic if phase_str == "depth" else None)
 
     async def _generate_question(self, phase_str: str, topic: str = "") -> str:
         """Ask LLM for a question for this phase (variant, logged)."""
+        if phase_str == "depth" and not topic:
+            topic = self.adaptive.strongest_topic or ""
         try:
             messages = [
                 {"role": "system", "content":
@@ -585,7 +598,8 @@ class InterviewSession:
                     question=answer_metadata.get("question_text") or self.current_question_text or "What do you know about this topic?",
                     student_answer=stt_text, llm=self.llm,
                 )
-                self.adaptive.observe(classification.label.value, classification.confidence)
+                self.adaptive.observe(classification.label.value, classification.confidence,
+                    self.adaptive.topic_for_question(answer_metadata.get("question_id", self.current_question_id)))
                 async with AsyncSessionLocal() as db:
                     saved = await db.get(TranscriptTurn, saved_turn_id)
                     if saved:
@@ -645,8 +659,7 @@ class InterviewSession:
                         self.current_question_text = next_q_text
                         self.controller.state.current_question_id = self.current_question_id
 
-                        # Synthesize single unified examiner response:
-                        # Comprehends previous response + seamless bridge + asks next question
+                        # Preserve the selected question with a neutral, bounded transition.
                         unified_text = await self._generate_unified_transition(
                             prev_question=prev_q_text,
                             student_answer=stt_text,
@@ -803,80 +816,20 @@ class InterviewSession:
         next_question: str,
         phase: str,
     ) -> str:
-        """
-        Synthesize a natural, unified examiner response that:
-        1. Contextually evaluates/acknowledges the candidate's previous response.
-        2. Seamlessly bridges to the next question in a single spoken turn.
-        Eliminates robotic dual-speech collisions.
-        """
-        label = classification.label.value if hasattr(classification.label, "value") else str(classification.label)
-        reason = getattr(classification, "reason", "") or ""
+        """Bridge to the selected question without generating answer hints or extra LLM work.
 
-        try:
-            messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are an expert university technical viva examiner. "
-                        "You speak directly to the candidate sitting across from you. "
-                        "Given the previous question, the candidate's answer, and technical evaluation, "
-                        "generate ONE natural, spoken transition that acknowledges their answer and introduces the next question.\n\n"
-                        "Guidelines:\n"
-                        "- If the answer was strong: validate their core technical point concisely (1 short sentence).\n"
-                        "- If the answer was partial: acknowledge what was right or note the missing piece constructively (1 short sentence).\n"
-                        "- If candidate said don't know / skip: warmly dismiss the topic without judgment (e.g., 'No problem at all, let us pivot.').\n"
-                        "- Then immediately ask the next question.\n"
-                        "- Speak directly to the candidate ('You explained...', 'Let us move to...').\n"
-                        "- Keep the acknowledgment concise (under 25 words) so the flow remains crisp and focused on the exam.\n"
-                        "- Output ONLY the spoken text. Do NOT include quotes, stage directions, or markdown."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"Previous Question: {prev_question}\n"
-                        f"Candidate Answer: {student_answer[:250]}\n"
-                        f"Evaluation: {label} ({reason})\n"
-                        f"Next Question: {next_question}\n\n"
-                        f"Format: [Brief 1-sentence evaluation/acknowledgment]. [Next question]"
-                    ),
-                },
-            ]
-            response = await self.llm.chat(messages, temperature=0.6, max_tokens=120)
-            cleaned = response.strip().strip('"').strip("'")
-            # Safety check: ensure next_question is included or appended if LLM omitted it
-            if next_question.lower()[:25] not in cleaned.lower():
-                cleaned = f"{cleaned} {next_question}"
-            return cleaned
-        except Exception as e:
-            logger.warning(f"Unified transition LLM generation notice: {e}; using contextual rule-based bridge.")
-            # High-fidelity contextual fallback:
-            if label == "strong":
-                prefix = random.choice([
-                    "Well articulated.",
-                    "Good explanation of those core concepts.",
-                    "Solid technical grasp.",
-                ])
-                bridge = "Building on that:"
-            elif label == "partial":
-                prefix = random.choice([
-                    "Good effort on the fundamentals.",
-                    "You touched on important points there.",
-                    "Fair attempt.",
-                ])
-                bridge = "Let's explore another area:"
-            elif label == "dont_know":
-                prefix = random.choice([
-                    "No problem at all, that's completely fine.",
-                    "No worries, let's pivot.",
-                    "Understood, that's quite alright.",
-                ])
-                bridge = "Let's move on to:"
-            else:
-                prefix = "Understood."
-                bridge = "Moving to our next topic:"
-
-            return f"{prefix} {bridge} {next_question}"
+        Candidate text and classifier explanations must never become instructions
+        for this transition. Keep the approved/traceable next question verbatim.
+        The async signature is retained for the live and reconnect callers.
+        """
+        label = getattr(classification.label, "value", classification.label)
+        acknowledgments = {
+            "strong": "Thank you for explaining your reasoning.",
+            "partial": "Thank you. Let's explore another area.",
+            "dont_know": "No problem. Let's try another topic.",
+            "off_topic": "Let's return to the subject.",
+        }
+        return f"{acknowledgments.get(label, 'Thank you.')} {next_question}"
 
     async def _generate_intelligent_follow_up(
         self, question: str, answer: str, reason: str = ""

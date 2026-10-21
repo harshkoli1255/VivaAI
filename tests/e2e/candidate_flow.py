@@ -28,9 +28,10 @@ expect.set_options(timeout=20000)
 ROOT = Path(__file__).resolve().parents[2]
 PYTHON = ROOT / '.venv/bin/python'
 NODE = ROOT / 'node_modules/.bin/next'
+AUDIO_ONLY = '--audio-only' in sys.argv
 FULL = '--full-duration' in sys.argv
 REAL = '--real-providers' in sys.argv or FULL
-ARTIFACTS = ROOT / 'test-results' / ('candidate-full-duration' if FULL else 'candidate-flow-real' if REAL else 'candidate-flow')
+ARTIFACTS = ROOT / 'test-results' / ('candidate-audio-streaming' if AUDIO_ONLY else 'candidate-full-duration' if FULL else 'candidate-flow-real' if REAL else 'candidate-flow')
 
 
 async def wait_for_server(url, processes):
@@ -78,8 +79,16 @@ async def main():
             'API_INTERNAL_URL': 'http://127.0.0.1:18000', 'NEXT_PUBLIC_WS_URL': 'ws://127.0.0.1:18000',
             'NEXT_PUBLIC_API_URL': 'http://127.0.0.1:18000', 'NEXT_PUBLIC_FACULTY_URL': 'http://127.0.0.1:13001',
             'NEXT_PUBLIC_STUDENT_URL': 'http://127.0.0.1:13000', 'NEXT_PUBLIC_MOCK_MODE': 'false',
-            'NEXT_BUILD_DIR': '.next-e2e', 'CORS_ORIGINS': 'http://127.0.0.1:13000,http://127.0.0.1:13001',
+            'NEXT_BUILD_DIR': '.next-e2e', 'VIVAAI_TEST_TONE': '1', 'CORS_ORIGINS': 'http://127.0.0.1:13000,http://127.0.0.1:13001',
             'ELEVENLABS_API_KEY': '', 'DEEPGRAM_API_KEY': '', 'OPENAI_API_KEY': '', 'ANTHROPIC_API_KEY': ''}
+        if not REAL:
+            # A fragmented MP3 proves real progressive browser playback, not just
+            # WebSocket byte delivery or a silent mock response.
+            import imageio_ffmpeg
+            tts_fixture = Path(directory) / 'synthetic-examiner.mp3'
+            subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), '-v', 'error', '-f', 'lavfi', '-i',
+                'sine=frequency=880:duration=3:sample_rate=16000', '-c:a', 'libmp3lame', '-b:a', '64k', str(tts_fixture)], check=True)
+            env['VIVAAI_TEST_TTS_FILE'] = str(tts_fixture)
         if REAL:
             from dotenv import dotenv_values
             configured = {key: value for key, value in dotenv_values(ROOT / '.env').items() if value is not None}
@@ -135,6 +144,31 @@ async def main():
                         }
                       };
                     })();""")
+                if not REAL:
+                    await context.add_init_script("""(() => {
+                      window.__speechPlayback = [];
+                      let current = null;
+                      const Original = window.WebSocket;
+                      window.WebSocket = class extends Original {
+                        constructor(...args) {
+                          super(...args);
+                          if (!String(args[0]).includes('/ws/interview/')) return;
+                          this.addEventListener('message', event => {
+                            const data = JSON.parse(event.data);
+                            if (data.type === 'ai_speaking') current = data.speech_id;
+                            if (['ai_speaking','ai_done_speaking'].includes(data.type))
+                              window.__speechPlayback.push({type:data.type,id:data.speech_id,at:performance.now()});
+                          });
+                        }
+                      };
+                      const originalPlay = HTMLMediaElement.prototype.play;
+                      HTMLMediaElement.prototype.play = function(...args) {
+                        this.addEventListener('playing', () => {
+                          if (current && (this.currentSrc || this.src).startsWith('blob:')) window.__speechPlayback.push({type:'audible',id:current,at:performance.now()});
+                        }, {once:true});
+                        return originalPlay.apply(this,args);
+                      };
+                    })();""")
                 page = await context.new_page()
                 errors = []
                 visited = []
@@ -146,7 +180,16 @@ async def main():
                         from full_duration_flow import run
                         await run(page, context, env, ARTIFACTS, processes, logs)
                         return
+                    await page.goto('http://127.0.0.1:13000/')
+                    from theme_regression import verify_theme_and_preview
+                    await verify_theme_and_preview(page, ARTIFACTS)
+                    await page.screenshot(path=str(ARTIFACTS / 'student-home.png'), full_page=True)
+                    await page.set_viewport_size({'width': 390, 'height': 844})
+                    assert await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), 'Home overflows on mobile'
+                    await page.screenshot(path=str(ARTIFACTS / 'mobile-home.png'), full_page=True)
+                    await page.set_viewport_size({'width': 1280, 'height': 900})
                     await page.goto('http://127.0.0.1:13000/login')
+                    await page.screenshot(path=str(ARTIFACTS / 'student-login.png'), full_page=True)
                     await page.get_by_label('University ID', exact=True).fill('STU001')
                     await page.get_by_label('Password', exact=True).fill('student123')
                     async with page.expect_response(lambda response: response.url.endswith('/auth/login')) as login_event:
@@ -159,12 +202,17 @@ async def main():
                     assert any(cookie['name'] == 'vivaai_session_student' and cookie['httpOnly'] for cookie in cookies)
                     assert await page.evaluate("['vivaai_token','vivaai_user','vivaai_auth'].every(key => localStorage.getItem(key) === null)")
                     # The readiness UI exercises actual getUserMedia against Chrome's synthetic source.
-                    await page.get_by_role('button', name='Enable & Test Microphone').click()
-                    await expect(page.get_by_text('Microphone Calibrated & Active')).to_be_visible()
-                    await page.get_by_role('button', name='Test Examiner Voice (ElevenLabs)', exact=True).click()
-                    await expect(page.get_by_role('button', name='Test Examiner Voice (ElevenLabs)', exact=True)).to_be_enabled(timeout=20000)
+                    await page.get_by_role('button', name='Enable microphone').click()
+                    await expect(page.get_by_text('Microphone ready')).to_be_visible()
+                    await page.get_by_role('button', name='Test sound', exact=True).click()
+                    await expect(page.get_by_role('button', name='Test sound', exact=True)).to_be_enabled(timeout=20000)
                     await page.get_by_role('button', name='I heard the sound', exact=True).click()
                     await page.locator('#exam-consent').check()
+                    await page.screenshot(path=str(ARTIFACTS / 'student-ready.png'), full_page=True)
+                    await page.set_viewport_size({'width': 390, 'height': 844})
+                    assert await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), 'Readiness overflows on mobile'
+                    await page.screenshot(path=str(ARTIFACTS / 'mobile-ready.png'), full_page=True)
+                    await page.set_viewport_size({'width': 1280, 'height': 900})
                     await page.get_by_role('button', name='Enter Live Examination Room').click()
                     await page.wait_for_url('**/interview/*')
                     session_id = page.url.rsplit('/', 1)[1]
@@ -172,11 +220,33 @@ async def main():
                     manifest_url = f'http://127.0.0.1:13000/api/v1/sessions/{session_id}/recording'
                     async def manifest(): return await (await context.request.get(manifest_url)).json()
                     first = await poll(manifest, lambda data: data.get('chunk_count', 0) >= 3)
+                    if not REAL:
+                        await poll(lambda: page.evaluate('window.__speechPlayback'),
+                            lambda events: any(event['type'] == 'ai_done_speaking' for event in events))
+                        playback = await page.evaluate('window.__speechPlayback')
+                        assert any(start['type'] == 'audible' and end['type'] == 'ai_done_speaking'
+                            and start['id'] == end['id'] and start['at'] < end['at']
+                            for start in playback for end in playback), playback
+                        (ARTIFACTS / 'progressive-playback.json').write_text(json.dumps(playback, indent=2))
+                        if AUDIO_ONLY:
+                            (ARTIFACTS / 'result.json').write_text(json.dumps({'passed': True, 'progressive_ai_playback': True, 'scope': 'Synthetic MP3 audible playback before final chunk; unlock/readiness audio excluded'}, indent=2))
+                            print('PASS: progressive MP3 playback before final chunk (excluding silent unlock audio)')
+                            return
+
+
+                    await page.screenshot(path=str(ARTIFACTS / 'live-interview.png'), full_page=True)
+                    await page.set_viewport_size({'width': 390, 'height': 844})
+                    assert await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), 'Live room overflows on mobile'
+                    await page.screenshot(path=str(ARTIFACTS / 'mobile-live.png'), full_page=True)
+                    await page.set_viewport_size({'width': 1280, 'height': 900})
+                    if not REAL:
+                        from speech_draft_regression import verify_speech_draft_edits
+                        await verify_speech_draft_edits(page)
                     # Spoken capture and typed-answer delivery share one transcript; do not grade microphone noise.
                     answer = 'Processes isolate memory. Threads share process memory and need mutexes to protect shared state.'
                     if REAL:
                         # Real microphone -> browser MediaRecorder -> Deepgram draft -> candidate confirmation.
-                        await page.get_by_role('button', name='Record with enhanced speech', exact=True).click()
+                        await page.get_by_role('button', name='Start live transcription', exact=True).click()
                         await expect(page.get_by_role('button', name='Stop & review transcript', exact=True)).to_be_visible()
                         await asyncio.sleep(20)
                         await page.get_by_role('button', name='Stop & review transcript', exact=True).click()
@@ -195,7 +265,25 @@ async def main():
                         assert not any(t['speaker'] == 'student' for t in before)
                         await page.get_by_role('button', name='Confirm & Submit Answer', exact=True).click()
                     else:
-                        await page.get_by_placeholder('Speak your answer naturally or type your response here... (Speech will stream in live)').fill(answer)
+                        # Stream microphone fragments and observe a draft BEFORE stopping.
+                        await page.get_by_role('button', name='Repeat question', exact=True).click()
+                        await asyncio.sleep(2)
+                        await page.get_by_role('button', name='Start live transcription', exact=True).click()
+                        await expect(page.get_by_role('button', name='Stop & review transcript', exact=True)).to_be_visible()
+                        await expect(page.get_by_label('Live transcript', exact=True)).to_contain_text('A mutex protects')
+                        live_before = await (await context.request.get(f'http://127.0.0.1:13000/api/v1/transcript/{session_id}')).json()
+                        assert not any(t['speaker'] == 'student' for t in live_before), 'An interim draft was graded without confirmation'
+                        await page.screenshot(path=str(ARTIFACTS / 'streaming-draft.png'), full_page=True)
+                        await page.get_by_role('button', name='Stop & review transcript', exact=True).click()
+                        await expect(page.locator('#candidate-text-answer')).to_have_value('A mutex protects shared state through mutual exclusion.')
+                        await page.locator('#candidate-text-answer').fill('My corrected explanation:')
+                        await page.get_by_role('button', name='Continue live transcription', exact=True).click()
+                        await expect(page.get_by_label('Live transcript', exact=True)).to_contain_text('My corrected explanation: A mutex protects')
+                        await page.get_by_role('button', name='Stop & review transcript', exact=True).click()
+                        await expect(page.locator('#candidate-text-answer')).to_have_value('My corrected explanation: A mutex protects shared state through mutual exclusion.')
+                        await page.get_by_role('button', name='Clear answer', exact=True).click()
+                        await expect(page.locator('#candidate-text-answer')).to_have_value('')
+                        await page.get_by_placeholder('Speak or type your answer here…').fill(answer)
                         await asyncio.sleep(1)
                         await page.get_by_role('button', name='Confirm & Submit Answer', exact=True).click()
                     async def transcript(): return await (await context.request.get(f'http://127.0.0.1:13000/api/v1/transcript/{session_id}')).json()
@@ -225,6 +313,7 @@ async def main():
                     await expect(page.get_by_text('Live Connected', exact=True)).to_be_visible(timeout=20000)
                     restored = await poll(manifest, lambda data: len(data.get('captures', [])) >= 2 and data['chunk_count'] > first['chunk_count'])
                     assert all(not capture['missing_sequences'] for capture in restored['captures'])
+                    assert all(capture['recording_kind'] == 'conversation' for capture in restored['captures'])
                     assert student_count(await transcript()) == 1
                     await page.get_by_role('button', name='End Viva Early', exact=True).click()
                     await page.get_by_role('button', name='Finish & Submit', exact=True).click()
@@ -242,7 +331,7 @@ async def main():
                     processes.append(subprocess.Popen([str(PYTHON), '-m', 'app.workers.scoring_worker'], cwd=ROOT / 'backend',
                         env=env, stdout=scorer_log, stderr=subprocess.STDOUT, start_new_session=True))
                     await page.get_by_role('link', name='View my interviews and feedback').click()
-                    await expect(page.get_by_role('heading', name='My interviews')).to_be_visible()
+                    await expect(page.get_by_role('heading', name='Results & feedback')).to_be_visible()
                     await page.get_by_role('button', name='View feedback', exact=True).click()
                     from evaluation_result import evaluation_result
                     scored = await evaluation_result(context, page, session_id, env)
@@ -251,6 +340,24 @@ async def main():
                     assert audio.status == 200
                     with wave.open(io.BytesIO(await audio.body()), 'rb') as recording:
                         assert recording.getnframes() > 16000
+                        frames, rate = recording.readframes(recording.getnframes()), recording.getframerate()
+                    if not REAL:
+                        import array
+                        samples = array.array('h', frames)
+                        def strongest_tone(frequency):
+                            maximum = 0
+                            size = 4000
+                            cosine = [math.cos(2 * math.pi * frequency * n / rate) for n in range(size)]
+                            sine = [math.sin(2 * math.pi * frequency * n / rate) for n in range(size)]
+                            for start in range(0, len(samples) - size, size // 2):
+                                block = samples[start:start + size]
+                                magnitude = 2 / size * math.hypot(sum(a*b for a,b in zip(block, cosine)), sum(a*b for a,b in zip(block, sine)))
+                                maximum = max(maximum, magnitude)
+                            return maximum
+                        tones = {'candidate_440hz': strongest_tone(440), 'examiner_880hz': strongest_tone(880)}
+                        (ARTIFACTS / 'mixed-audio-proof.json').write_text(json.dumps(tones, indent=2))
+                        assert tones['candidate_440hz'] > 50, tones
+                        assert tones['examiner_880hz'] > 50, tones
                     await page.screenshot(path=str(ARTIFACTS / 'candidate-feedback.png'), full_page=True)
                     # Faculty portal uses its own HttpOnly cookie and can review the complete recording.
                     faculty = await context.new_page()
@@ -260,10 +367,27 @@ async def main():
                     await faculty.get_by_label('Password', exact=True).fill('faculty123')
                     await faculty.get_by_role('button', name='Sign in to Faculty Portal').click()
                     await faculty.wait_for_url('**/dashboard')
+                    await expect(faculty.get_by_role('heading', name='Viva dashboard')).to_be_visible()
+                    await expect(faculty.get_by_text('Loading assessment sessions…', exact=True)).not_to_be_visible()
+                    await faculty.screenshot(path=str(ARTIFACTS / 'faculty-dashboard.png'), full_page=True)
+                    await faculty.goto('http://127.0.0.1:13001/setup')
+                    await expect(faculty.get_by_role('heading', name='Create a viva', exact=True)).to_be_visible()
+                    await faculty.screenshot(path=str(ARTIFACTS / 'faculty-setup.png'), full_page=True)
                     await faculty.goto(f'http://127.0.0.1:13001/review/{session_id}')
                     await expect(faculty.get_by_text(answer, exact=False).first).to_be_visible(timeout=30000)
                     await expect(faculty.locator('audio')).to_have_attribute('src', __import__('re').compile(r'^blob:'), timeout=30000)
+                    timeline = faculty.get_by_role('slider', name='Recording position', exact=True)
+                    await timeline.focus()
+                    await timeline.press('ArrowRight')
+                    await expect(timeline).to_have_attribute('aria-valuenow', '5')
+                    await timeline.press('Home')
+                    await expect(timeline).to_have_attribute('aria-valuenow', '0')
                     await faculty.screenshot(path=str(ARTIFACTS / 'faculty-review.png'), full_page=True)
+                    await faculty.get_by_text('Recording retention', exact=True).click()
+                    await faculty.get_by_label('Reason for changing protection', exact=True).fill('Synthetic appeal review; preserve this test record.')
+                    await faculty.get_by_role('button', name='Protect from deletion', exact=True).click()
+                    await expect(faculty.get_by_role('button', name='Remove retention hold', exact=True)).to_be_visible()
+
                     if scored.get('status') == 'review_required':
                         await faculty.get_by_label('Score (0–100)', exact=True).fill('76')
                         await faculty.get_by_label('Reason for adjustment', exact=True).fill('Synthetic test: faculty reviewed recording and rubric evidence.')
@@ -272,6 +396,20 @@ async def main():
                         await expect(page.get_by_text('76.0 / 100', exact=True)).to_be_visible(timeout=30000)
                         await expect(page.get_by_text('Faculty assessment, based on a review of your interview.', exact=True)).to_be_visible()
                         await expect(page.get_by_text('Synthetic test: faculty reviewed recording and rubric evidence.', exact=True)).to_be_visible()
+                    # Actual browser downloads, including the faculty-only report path.
+                    async with faculty.expect_download() as pending_download:
+                        await faculty.get_by_role('button', name='Download report', exact=True).click()
+                    report_download = await pending_download.value
+                    assert await report_download.failure() is None
+                    report_path = await report_download.path()
+                    assert Path(report_path).read_bytes().startswith(b'%PDF-')
+                    await report_download.save_as(ARTIFACTS / 'faculty-downloaded-report.pdf')
+                    await faculty.goto('http://127.0.0.1:13001/dashboard')
+                    async with faculty.expect_download() as pending_csv:
+                        await faculty.get_by_role('button', name='Export CSV', exact=True).click()
+                    csv_download = await pending_csv.value
+                    assert await csv_download.failure() is None
+                    assert 'effective_score' in Path(await csv_download.path()).read_text()
                     identity = await context.request.get('http://127.0.0.1:13000/api/v1/auth/me')
                     assert (await identity.json())['role'] == 'student'
                     # The browser gateway rejects cross-origin state-changing requests.
@@ -295,24 +433,69 @@ async def main():
                     await mobile.wait_for_url('**/interview/*')
                     await expect(mobile.get_by_text('Live Connected', exact=True)).to_be_visible()
                     mobile_id = mobile.url.rsplit('/', 1)[1]
-                    await mobile.get_by_placeholder('Speak your answer naturally or type your response here... (Speech will stream in live)').fill(answer)
+                    await mobile.get_by_placeholder('Speak or type your answer here…').fill(answer)
                     await asyncio.sleep(1)
                     await mobile.get_by_role('button', name='Confirm & Submit Answer', exact=True).click()
                     async def mobile_transcript(): return await (await mobile_context.request.get(f'http://127.0.0.1:13000/api/v1/transcript/{mobile_id}')).json()
                     await poll(mobile_transcript, lambda data: student_count(data) == 1)
+                    # Three confirmed answers provide enough fixture evidence for per-line feedback.
+                    if not REAL:
+                        for index in range(2):
+                            await poll(mobile_transcript, lambda data: sum(t['speaker'] == 'ai' for t in data) >= index + 2)
+                            await mobile.locator('#candidate-text-answer').fill(f'Example {index + 1}: A process isolates its address space while threads share memory and synchronize access with mutex locks.')
+                            if index == 1:
+                                await mobile.get_by_text('Add a code snippet (optional)', exact=True).click()
+                                await mobile.get_by_label('Share a short example', exact=False).fill('counter += 1  # protect this operation with a lock')
+                            await mobile.get_by_role('button', name='Confirm & Submit Answer', exact=True).click()
+                            saved_mobile = await poll(mobile_transcript, lambda data: sum(t['speaker'] == 'student' for t in data) == index + 2)
+                            if index == 1:
+                                assert any('Code snippet (not executed):' in t['text'] for t in saved_mobile if t['speaker'] == 'student')
                     await mobile.get_by_role('button', name='End Viva Early', exact=True).click()
                     await mobile.get_by_role('button', name='Finish & Submit', exact=True).click()
                     await expect(mobile.get_by_role('heading', name='Your viva has ended')).to_be_visible()
                     mobile_audio = await mobile_context.request.get(f'http://127.0.0.1:13000/api/v1/sessions/{mobile_id}/recording')
-                    assert (await mobile_audio.json())['chunk_count'] == 0
+                    mobile_manifest = await mobile_audio.json()
+                    assert mobile_manifest['chunk_count'] > 0
+                    assert all(c['recording_kind'] == 'conversation' for c in mobile_manifest['captures'])
                     await mobile.get_by_role('link', name='View my interviews and feedback').click()
                     await mobile.get_by_role('button', name='View feedback', exact=True).click()
-                    await evaluation_result(mobile_context, mobile, mobile_id, env)
+                    mobile_score = await evaluation_result(mobile_context, mobile, mobile_id, env)
+                    if not REAL:
+                        (ARTIFACTS / 'mobile-score.json').write_text(json.dumps(mobile_score, indent=2))
+                        assert len(mobile_score['feedback_evidence']) == 3
+                        assert all(item['citations'] for item in mobile_score['feedback_evidence'])
+                        citation = mobile_score['feedback_evidence'][0]['citations'][0]
+                        await mobile.get_by_role('button', name=__import__('re').compile('Read evidence for feedback 1')).first.click()
+                        await expect(mobile.get_by_role('heading', name='Transcript evidence', exact=True)).to_be_visible()
+                        await expect(mobile.locator('blockquote')).to_have_text(citation['text'])
+                        await mobile.screenshot(path=str(ARTIFACTS / 'candidate-feedback-evidence.png'), full_page=True)
+                        await faculty.goto(f'http://127.0.0.1:13001/review/{mobile_id}')
+                        await faculty.get_by_role('button', name=__import__('re').compile('Read evidence for feedback 1')).first.click()
+                        await expect(faculty.locator(f'#turn-{citation["turn_id"]}')).to_be_in_viewport()
+                        await faculty.evaluate('window.scrollTo(0, 0)')
+                        await faculty.screenshot(path=str(ARTIFACTS / 'faculty-feedback-evidence.png'), full_page=True)
+                        async with faculty.expect_download() as ai_pdf:
+                            await faculty.get_by_role('button', name='Download report', exact=True).click()
+                        assert Path(await (await ai_pdf.value).path()).read_bytes().startswith(b'%PDF-')
+
+                    if not REAL:
+                        await faculty.goto('http://127.0.0.1:13001/calibration')
+                        await expect(faculty.get_by_text('No comparisons yet.', exact=False)).to_be_visible()
+                        await faculty.get_by_label('Faculty marks CSV', exact=True).set_input_files({'name':'synthetic-labels.csv','mimeType':'text/csv','buffer':f'session_id,faculty_score\n{mobile_id},80\n'.encode()})
+                        await faculty.get_by_role('button', name='Compare marks', exact=True).click()
+                        await expect(faculty.get_by_role('heading', name='1 viva comparisons', exact=True)).to_be_visible()
+                        await expect(faculty.get_by_text('Mock scores are included.', exact=False)).to_be_visible()
+                        await faculty.screenshot(path=str(ARTIFACTS / 'faculty-calibration.png'), full_page=True)
+                        async with faculty.expect_download() as comparison_json:
+                            await faculty.get_by_role('button', name='Download results', exact=True).click()
+                        comparison_data = json.loads(Path(await (await comparison_json.value).path()).read_text())
+                        assert comparison_data['summary']['comparisons'] == 1
+
                     await mobile.screenshot(path=str(ARTIFACTS / 'mobile-feedback.png'), full_page=True)
                     await mobile_context.close()
                     assert not any('password=' in url for url in visited)
                     assert not errors, errors
-                    (ARTIFACTS / 'result.json').write_text(json.dumps({'passed': True, 'real_providers': REAL, 'backend_audio_transcription': REAL, 'reviewable_cloud_speech': REAL, 'live_speech_interruption': REAL, 'session_id': session_id,
+                    (ARTIFACTS / 'result.json').write_text(json.dumps({'passed': True, 'report_download': True, 'csv_download': True, 'calibration_download': not REAL, 'real_providers': REAL, 'speech_draft_editing': not REAL, 'feedback_evidence_links': not REAL, 'theme_consistency': True, 'interactive_preview': True, 'progressive_ai_playback': not REAL, 'retention_hold': True, 'code_snippet': not REAL, 'streaming_transcription': True, 'mixed_conversation_recording': True, 'backend_audio_transcription': REAL, 'reviewable_cloud_speech': REAL, 'live_speech_interruption': REAL, 'session_id': session_id,
                         'captures_after_reload': len(restored['captures']), 'api_restart_before_scoring': True, 'recording_playback': True, 'mobile_typed_interview': True, 'browser_errors': errors}, indent=2))
                     print('PASS: sign-in, microphone readiness, answer, offline recovery, reload, recording continuity, completion, API restart, separate scoring worker, feedback, faculty recording playback, CSRF, logout and mobile typed interview')
                 except Exception:

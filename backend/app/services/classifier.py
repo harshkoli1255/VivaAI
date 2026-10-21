@@ -94,7 +94,8 @@ async def classify_answer(
     ]
 
     try:
-        result = await llm.chat_json(messages, temperature=0.0, max_tokens=128)
+        classify_json = getattr(llm, "chat_json_fast", llm.chat_json)
+        result = await classify_json(messages, temperature=0.0, max_tokens=128)
         label_str = result.get("label", "partial").lower()
 
         # Validate label

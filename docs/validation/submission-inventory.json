@@ -1,0 +1,99 @@
+{
+  "generated_at": "2026-10-21T15:19:52.646279+00:00",
+  "scope": "Local source and evidence-file inventory only; does not validate artifact contents or a deployed system",
+  "file_inventory_complete": true,
+  "challenge_ready": false,
+  "files": {
+    "setup": {
+      "present": [
+        "README.md",
+        "docker-compose.yml",
+        ".env.example"
+      ],
+      "missing": []
+    },
+    "design": {
+      "present": [
+        "docs/DESIGN.md",
+        "output/pdf/vivaai-design.pdf"
+      ],
+      "missing": []
+    },
+    "streaming_and_retention": {
+      "present": [
+        "docs/STREAMING.md",
+        "scripts/retention.py"
+      ],
+      "missing": []
+    },
+    "sample_configuration": {
+      "present": [
+        "samples/viva-config.json",
+        "samples/questions.csv",
+        "samples/questions.json"
+      ],
+      "missing": []
+    },
+    "test_report": {
+      "present": [
+        "TEST_REPORT.md"
+      ],
+      "missing": []
+    },
+    "persona_probe": {
+      "present": [
+        "samples/scripted-personas.json",
+        "scripts/persona_probe.py",
+        "docs/validation/scripted-personas.json"
+      ],
+      "missing": []
+    },
+    "benchmark_tools": {
+      "present": [
+        "tests/quality/evaluate.py",
+        "tests/quality/README.md"
+      ],
+      "missing": []
+    },
+    "load_results_and_plan": {
+      "present": [
+        "docs/validation/transport-load.json",
+        "docs/CAPACITY.md"
+      ],
+      "missing": []
+    },
+    "cost_tools": {
+      "present": [
+        "scripts/cost_sheet.py",
+        "docs/cost-inputs.example.json",
+        "docs/validation/cost-sheet-pending.json"
+      ],
+      "missing": []
+    },
+    "privacy_note": {
+      "present": [
+        "docs/PRIVACY.md"
+      ],
+      "missing": []
+    },
+    "demo_export_tool": {
+      "present": [
+        "scripts/export_demo_bundle.py"
+      ],
+      "missing": []
+    }
+  },
+  "pending_verification": [
+    "Five complete consented demo vivas with recordings, transcripts and scores",
+    "At least ten human-versus-AI grading comparisons with gap and correlation",
+    "At least twenty accented English/Hinglish speech clips with human references and WER",
+    "Human review of follow-up relevance, no answer leakage and fairness",
+    "Real end-of-speech to first-audible-response p50/p95 below target",
+    "Representative full-duration PostgreSQL and real-provider load proof at 50/100/150",
+    "Measured provider usage and sourced operating costs for one viva and 350",
+    "Institution-approved retention period, holds, purge and backup procedures",
+    "Published live demonstration or five-minute video and shareable audit screenshots",
+    "Container startup verification and pinned tested production image digests"
+  ],
+  "note": "Review docs/REQUIREMENTS.md. File presence never marks human evidence, latency, privacy or production capacity as satisfied."
+}

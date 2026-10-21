@@ -1,0 +1,29 @@
+{
+  "passed": true,
+  "versioned_editing": true,
+  "concurrent_student_continuity": true,
+  "reconnect_uses_original_version": true,
+  "pause_enrollment": true,
+  "editor_draft_restore": true,
+  "invitation_sign_in": true,
+  "question_import_export": true,
+  "duplicate": true,
+  "student_report_download": true,
+  "mobile_layout": true,
+  "browser_errors": [],
+  "backend_quality_tests_passed": 198,
+  "production_builds": {
+    "student": "passed",
+    "faculty": "passed"
+  },
+  "existing_interview_regression": "passed",
+  "source": "isolated mock providers and synthetic interview data",
+  "committed": false,
+  "pushed": false,
+  "preview_read_only_checks": {
+    "passed": true,
+    "per_viva_review_and_csv": true,
+    "dark_mobile_library_editor": true,
+    "preview_assessments_changed": false
+  }
+}

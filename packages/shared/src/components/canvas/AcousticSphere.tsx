@@ -171,7 +171,7 @@ export function AcousticSphere({
     };
 
     if (interactive) {
-      container.addEventListener('mousemove', handleMouseMove);
+      container.addEventListener('pointermove', handleMouseMove);
     }
 
     // 4. Animation Loop
@@ -190,9 +190,9 @@ export function AcousticSphere({
 
       // Update material colors if theme changed
       const darkNow = currentTheme === 'dark';
-      wireframeMaterial.color.setHex(darkNow ? 0x2dd4bf : 0x0f5b4a);
-      particleMaterial.color.setHex(darkNow ? 0x5eead4 : 0x0d9488);
-      coreMaterial.color.setHex(darkNow ? 0x0f766e : 0x115e59);
+      wireframeMaterial.color.setHex(darkNow ? 0xa9c9ff : 0x3558e8);
+      particleMaterial.color.setHex(darkNow ? 0xc8f3e4 : 0x527de0);
+      coreMaterial.color.setHex(darkNow ? 0x42699e : 0x35518a);
 
       // Dynamic oscillation parameters based on state
       let speed = 0.8;
@@ -305,7 +305,7 @@ export function AcousticSphere({
       document.removeEventListener('visibilitychange', handleVisibility);
       intersectionObserver.disconnect();
       if (interactive) {
-        container.removeEventListener('mousemove', handleMouseMove);
+        container.removeEventListener('pointermove', handleMouseMove);
       }
       resizeObserver.disconnect();
       baseGeometry.dispose();

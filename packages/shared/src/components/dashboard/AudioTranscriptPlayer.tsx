@@ -29,6 +29,10 @@ export interface TranscriptTurn {
   classifier_confidence?: number | null;
 }
 
+function activityLabel(type: string) {
+  return type === 'tab_switch' ? 'Tab switch' : type === 'long_silence' ? 'Extended silence' : type === 'multiple_voices' ? 'Multiple voices · review' : 'Session activity';
+}
+
 export interface ProctoringEvent {
   event_type: 'tab_switch' | 'long_silence' | string;
   timestamp_secs: number;
@@ -241,7 +245,7 @@ export function AudioTranscriptPlayer({
       .map(
         (t) =>
           `[${formatTime(t.timestamp_secs)}] ${
-            isAiSpeaker(t.speaker) ? 'Examiner AI' : 'Candidate'
+            isAiSpeaker(t.speaker) ? 'Examiner' : 'Candidate'
           }: ${t.text}`
       )
       .join('\n\n');
@@ -301,15 +305,15 @@ export function AudioTranscriptPlayer({
       {/* ── Audio Playback & Waveform Scrubber Console ── */}
       <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 sm:p-5 space-y-4 shadow-sm">
         {/* Top Header Row */}
-        <div className="flex items-center justify-between text-xs">
-          <div className="flex items-center gap-2 font-bold text-[var(--text-primary)]">
+        <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex flex-wrap items-center gap-2 font-semibold text-[var(--text-primary)]">
             <Volume2 className="w-4 h-4 text-[var(--primary)]" />
-            <span>{effectiveAudioUrl && !audioError ? 'Session Audio Recording' : 'Synchronized Transcript & Audio Player'}</span>
+            <span>Session recording</span>
             <Badge variant={effectiveAudioUrl && !audioError ? 'success' : 'neutral'} className="text-[10px] py-0 px-1.5">
-              {effectiveAudioUrl && !audioError ? 'Live Audio Recording' : 'Voice Player Ready'}
+              {effectiveAudioUrl && !audioError ? 'Saved recording' : 'Transcript available'}
             </Badge>
           </div>
-          <div className="flex items-center gap-2 font-mono text-xs">
+          <div className="flex shrink-0 items-center gap-2 font-mono text-xs tabular-nums">
             <span className="font-bold text-[var(--primary)]">{formatTime(currentTime)}</span>
             <span className="text-[var(--text-muted)]">/</span>
             <span className="text-[var(--text-secondary)]">{formatTime(totalDuration)}</span>
@@ -346,6 +350,17 @@ export function AudioTranscriptPlayer({
         {/* ── Interactive Waveform Timeline ── */}
         <div
           ref={timelineRef}
+          role="slider"
+          tabIndex={0}
+          aria-label="Recording position"
+          aria-valuemin={0}
+          aria-valuemax={totalDuration}
+          aria-valuenow={Math.min(currentTime, totalDuration)}
+          aria-valuetext={`${formatTime(currentTime)} of ${formatTime(totalDuration)}`}
+          onKeyDown={(event) => {
+            const positions: Record<string, number> = { ArrowRight: currentTime + 5, ArrowLeft: currentTime - 5, Home: 0, End: totalDuration };
+            if (event.key in positions) { event.preventDefault(); seekTo(Math.max(0, Math.min(totalDuration, positions[event.key]))); }
+          }}
           onClick={handleTimelineClick}
           className="relative h-12 w-full bg-[var(--bg-muted)] rounded-lg border border-[var(--border-subtle)] p-2 cursor-pointer flex items-center justify-between gap-1 overflow-hidden group select-none"
           title="Click to seek anywhere in the examination recording"
@@ -390,7 +405,7 @@ export function AudioTranscriptPlayer({
                   isTabSwitch ? 'bg-rose-500' : 'bg-amber-400'
                 }`}
                 style={{ left: `${leftPct}%` }}
-                title={`${isTabSwitch ? 'Tab Switch Anomaly' : 'Extended Silence Anomaly'} at ${formatTime(evt.timestamp_secs)}${
+                title={`${activityLabel(evt.event_type)} at ${formatTime(evt.timestamp_secs)}${
                   evt.question_text ? ` during question: "${evt.question_text.slice(0, 40)}..."` : ''
                 }`}
               >
@@ -411,7 +426,7 @@ export function AudioTranscriptPlayer({
           <div className="flex flex-wrap items-center gap-2 p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs">
             <span className="font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-              Correlated Proctoring Timeline ({proctoringEvents.length} events logged):
+              Session activity ({proctoringEvents.length} events logged):
             </span>
             <div className="flex flex-wrap gap-1.5">
               {proctoringEvents.map((evt, idx) => (
@@ -423,7 +438,7 @@ export function AudioTranscriptPlayer({
                   title="Click to jump to this point in the verbatim recording"
                 >
                   <span className={evt.event_type === 'tab_switch' ? 'text-rose-600 dark:text-rose-400 font-bold' : 'text-amber-600 dark:text-amber-400 font-bold'}>
-                    {evt.event_type === 'tab_switch' ? '⚠️ Tab Switch' : '⏱ Silence'}
+                    {activityLabel(evt.event_type)}
                   </span>
                   <span className="text-[var(--text-muted)]">@{formatTime(evt.timestamp_secs)}</span>
                   {evt.question_text && (
@@ -440,7 +455,7 @@ export function AudioTranscriptPlayer({
         {/* ── Controls & Speed Strip ── */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 border-t border-[var(--border-subtle)]">
           {/* Play / Pause / Rewind */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={togglePlay}
@@ -465,15 +480,15 @@ export function AudioTranscriptPlayer({
             </button>
 
             {/* Speed Selector Pills */}
-            <div className="flex items-center gap-1 bg-[var(--bg-muted)] p-0.5 rounded border border-[var(--border-subtle)]">
+            <div className="flex items-center gap-1 bg-[var(--bg-muted)] p-1 rounded-lg border border-[var(--border-subtle)]">
               {[1, 1.25, 1.5, 2].map((rate) => (
                 <button
                   key={rate}
                   type="button"
                   onClick={() => changeSpeed(rate)}
-                  className={`px-2 py-1 text-[11px] font-mono rounded font-semibold transition-colors ${
+                  className={`min-h-9 min-w-9 px-2 py-1 text-[11px] font-mono rounded-md font-semibold transition-colors ${
                     playbackRate === rate
-                      ? 'bg-[var(--primary)] text-white shadow-xs'
+                      ? 'bg-[var(--primary)] text-[var(--primary-fg)] shadow-xs'
                       : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                   }`}
                 >
@@ -506,27 +521,29 @@ export function AudioTranscriptPlayer({
       </div>
 
       {/* ── Search & Filter Controls ── */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-[var(--bg-card)] p-3 rounded-lg border border-[var(--border-default)]">
+      <div className="flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-3 bg-[var(--bg-card)] p-3 rounded-lg border border-[var(--border-default)]">
         {/* Search Input */}
-        <div className="relative flex-1">
+        <div className="relative min-w-0 flex-1">
           <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search dialogue keywords (e.g., deadlock, mutex, LRU)..."
-            className="w-full pl-8 pr-3 py-1.5 text-xs rounded bg-[var(--bg-muted)] border border-[var(--border-subtle)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--primary)]"
+            aria-label="Search transcript"
+            className="min-h-11 w-full pl-9 pr-3 py-2 text-sm rounded-lg bg-[var(--bg-muted)] border border-[var(--border-subtle)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--primary)]"
           />
         </div>
 
         {/* Filter Chips */}
-        <div className="flex items-center gap-1.5 overflow-x-auto text-xs shrink-0">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
           <button
             type="button"
             onClick={() => setSpeakerFilter('all')}
-            className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-colors ${
+            aria-pressed={speakerFilter === 'all'}
+            className={`min-h-10 px-2.5 py-2 rounded-lg text-[11px] font-semibold transition-colors ${
               speakerFilter === 'all'
-                ? 'bg-[var(--primary)] text-white'
+                ? 'bg-[var(--primary)] text-[var(--primary-fg)]'
                 : 'bg-[var(--bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--bg-card-hover)]'
             }`}
           >
@@ -535,9 +552,10 @@ export function AudioTranscriptPlayer({
           <button
             type="button"
             onClick={() => setSpeakerFilter('student')}
-            className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-colors ${
+            aria-pressed={speakerFilter === 'student'}
+            className={`min-h-10 px-2.5 py-2 rounded-lg text-[11px] font-semibold transition-colors ${
               speakerFilter === 'student'
-                ? 'bg-[var(--primary)] text-white'
+                ? 'bg-[var(--primary)] text-[var(--primary-fg)]'
                 : 'bg-[var(--bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--bg-card-hover)]'
             }`}
           >
@@ -546,9 +564,10 @@ export function AudioTranscriptPlayer({
           <button
             type="button"
             onClick={() => setSpeakerFilter('interviewer')}
-            className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-colors ${
+            aria-pressed={speakerFilter === 'interviewer'}
+            className={`min-h-10 px-2.5 py-2 rounded-lg text-[11px] font-semibold transition-colors ${
               speakerFilter === 'interviewer'
-                ? 'bg-[var(--primary)] text-white'
+                ? 'bg-[var(--primary)] text-[var(--primary-fg)]'
                 : 'bg-[var(--bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--bg-card-hover)]'
             }`}
           >
@@ -557,9 +576,10 @@ export function AudioTranscriptPlayer({
           <button
             type="button"
             onClick={() => setSpeakerFilter('graded')}
-            className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-colors ${
+            aria-pressed={speakerFilter === 'graded'}
+            className={`min-h-10 px-2.5 py-2 rounded-lg text-[11px] font-semibold transition-colors ${
               speakerFilter === 'graded'
-                ? 'bg-[var(--primary)] text-white'
+                ? 'bg-[var(--primary)] text-[var(--primary-fg)]'
                 : 'bg-[var(--bg-muted)] text-[var(--text-secondary)] hover:bg-[var(--bg-card-hover)]'
             }`}
           >
@@ -612,6 +632,7 @@ export function AudioTranscriptPlayer({
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return;
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
                     jumpToTurn(turn);
@@ -626,8 +647,8 @@ export function AudioTranscriptPlayer({
                 }`}
               >
                 {/* Header Strip */}
-                <div className="flex items-center justify-between text-xs mb-2 pb-2 border-b border-[var(--border-subtle)]">
-                  <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-3 text-xs mb-3 pb-3 border-b border-[var(--border-subtle)]">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <span
                       className={`font-bold flex items-center gap-1.5 px-2 py-0.5 rounded text-xs ${
                         isInterviewer
@@ -636,7 +657,7 @@ export function AudioTranscriptPlayer({
                       }`}
                     >
                       {isInterviewer ? <Volume2 className="w-3.5 h-3.5" /> : <User className="w-3.5 h-3.5" />}
-                      <span>{isInterviewer ? 'Examiner AI' : 'Candidate'}</span>
+                      <span>{isInterviewer ? 'Examiner' : 'Candidate'}</span>
                     </span>
 
                     <span className="font-mono text-[11px] text-[var(--text-muted)]">
@@ -657,7 +678,7 @@ export function AudioTranscriptPlayer({
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     {turn.answer_label && (
                       <Badge
                         variant={
@@ -690,9 +711,9 @@ export function AudioTranscriptPlayer({
                         e.stopPropagation();
                         handlePlayTurn(turn);
                       }}
-                      className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold transition-all ${
+                      className={`flex min-h-9 items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
                         isTurnPlaying
-                          ? 'bg-[var(--primary)] text-white shadow-xs'
+                          ? 'bg-[var(--primary)] text-[var(--primary-fg)] shadow-xs'
                           : 'bg-[var(--bg-muted)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--border-subtle)] border border-[var(--border-subtle)]'
                       }`}
                       title={isTurnPlaying ? 'Pause audio' : 'Play audio for this turn'}
@@ -724,15 +745,15 @@ export function AudioTranscriptPlayer({
                       className="mb-2 px-2.5 py-1.5 rounded-md bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-[11px] flex items-center justify-between"
                     >
                       <span className="flex items-center gap-1.5 font-semibold">
-                        <span>{evt.event_type === 'tab_switch' ? '⚠️ Tab Switch Anomaly' : '⏱ Extended Silence Anomaly'}</span>
-                        <span className="font-normal opacity-80 text-[10px]">— {evt.message || 'Integrity anomaly recorded'}</span>
+                        <span>{activityLabel(evt.event_type)}</span>
+                        <span className="font-normal opacity-80 text-[10px]">— {evt.message || 'Activity recorded; review context'}</span>
                       </span>
                       <span className="font-mono text-[10px] font-bold">@{formatTime(evt.timestamp_secs)}</span>
                     </div>
                   ))}
 
                 {/* Turn Dialogue Text */}
-                <p className="text-sm text-[var(--text-primary)] leading-relaxed font-normal">
+                <p className="whitespace-pre-wrap break-words text-sm text-[var(--text-primary)] leading-relaxed font-normal">
                   {turn.text}
                 </p>
                 {turn.answer_metadata?.reviewed && <p className="mt-2 text-xs text-[var(--text-muted)]">

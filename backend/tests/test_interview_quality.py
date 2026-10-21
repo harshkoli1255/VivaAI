@@ -81,6 +81,7 @@ async def test_auto_submitted_browser_speech_requires_transcript_verification():
 async def test_malformed_numeric_score_gets_one_bounded_schema_repair():
     valid = MockLLMProvider()._mock_score()
     for dimension in DIMS: valid[f'{dimension}_turn_ids'] = [1, 3, 5]
+    valid["feedback_turn_ids"] = [[1], [3], [5]]
     invalid = dict(valid, practical_project_score='Explanation accidentally returned in numeric field')
     llm = SimpleNamespace(chat_json=AsyncMock(side_effect=[invalid, valid]))
     turns = [{'turn_index': index, 'speaker': 'student', 'text': 'A clear candidate answer.'} for index in (1, 3, 5)]

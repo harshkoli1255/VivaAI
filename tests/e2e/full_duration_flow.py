@@ -55,10 +55,10 @@ async def run(page, context, env, artifacts, processes, logs):
     await page.get_by_label('Password', exact=True).fill('student123')
     await page.get_by_role('button', name='Sign in to Student Portal').click()
     await page.wait_for_url('**/interview')
-    await page.get_by_role('button', name='Enable & Test Microphone').click()
-    await expect(page.get_by_text('Microphone Calibrated & Active')).to_be_visible()
-    await page.get_by_role('button', name='Test Examiner Voice (ElevenLabs)', exact=True).click()
-    await expect(page.get_by_role('button', name='Test Examiner Voice (ElevenLabs)', exact=True)).to_be_enabled()
+    await page.get_by_role('button', name='Enable microphone').click()
+    await expect(page.get_by_text('Microphone ready')).to_be_visible()
+    await page.get_by_role('button', name='Test sound', exact=True).click()
+    await expect(page.get_by_role('button', name='Test sound', exact=True)).to_be_enabled()
     await page.get_by_role('button', name='I heard the sound', exact=True).click()
     await page.locator('#exam-consent').check()
     await page.get_by_role('button', name='Enter Live Examination Room').click()
@@ -67,8 +67,8 @@ async def run(page, context, env, artifacts, processes, logs):
     await expect(page.get_by_text('Live Connected', exact=True)).to_be_visible()
     start = time.monotonic()
     submitted, phases, milestones = 0, set(), []
-    text_box = page.get_by_placeholder('Speak your answer naturally or type your response here... (Speech will stream in live)')
-    await page.get_by_role('button', name='Tap to Speak', exact=True).click()
+    text_box = page.get_by_placeholder('Speak or type your answer here…')
+    await page.get_by_role('button', name='Speak your answer', exact=True).click()
     while time.monotonic() - start < 905:
         elapsed = time.monotonic() - start
         events = await page.evaluate('window.__roomEvents || []')
@@ -84,9 +84,9 @@ async def run(page, context, env, artifacts, processes, logs):
                 assert any(e.get('type') == 'result' and e.get('text') for e in voice)
                 await page.get_by_role('button', name='Confirm & Submit Answer', exact=True).click()
                 submitted += 1
-            elif elapsed < 850 and elapsed % 60 < 6 and await page.get_by_role('button', name='Tap to Speak', exact=True).is_visible():
+            elif elapsed < 850 and elapsed % 60 < 6 and await page.get_by_role('button', name='Speak your answer', exact=True).is_visible():
                 try:
-                    await page.get_by_role('button', name='Tap to Speak', exact=True).click(timeout=500)
+                    await page.get_by_role('button', name='Speak your answer', exact=True).click(timeout=500)
                 except Exception:
                     pass
         if not milestones or elapsed - milestones[-1]['elapsed'] >= 30:

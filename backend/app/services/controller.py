@@ -157,7 +157,7 @@ class InterviewController:
 
     @property
     def total_duration(self) -> float:
-        return max(timing["end"] for timing in self.state.phase_timings.values())
+        return min(TOTAL_SECS, max(timing["end"] for timing in self.state.phase_timings.values()))
 
     # ── Time management ────────────────────────────────────────
 

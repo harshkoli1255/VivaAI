@@ -27,6 +27,10 @@ class Settings(BaseSettings):
 
     SCORING_WORKER_ENABLED: bool = True
 
+    # Disabled until the institution approves both values. No automatic purge.
+    RETENTION_DAYS: int = 0
+    RETENTION_POLICY_ID: str = ""
+
     # Redis / Celery
     REDIS_URL: str = "redis://localhost:6379/0"
 
@@ -51,6 +55,7 @@ class Settings(BaseSettings):
     # STT
     DEEPGRAM_API_KEY: str = ""
     DEEPGRAM_STT_MODEL: str = "nova-2"
+    DEEPGRAM_MULTILINGUAL_MODEL: str = "nova-3"
 
     # TTS
     TTS_PROVIDER: str = "elevenlabs"

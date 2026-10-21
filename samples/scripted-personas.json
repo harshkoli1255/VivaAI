@@ -1,0 +1,26 @@
+[
+  {
+    "id": "strong",
+    "question": "Compare a process and a thread.",
+    "answers": [
+      {"text": "Processes normally have separate address spaces. Threads in one process share its address space but have their own stacks and registers. Shared mutable state needs synchronization.", "label": "strong", "expected_action": "ask_follow_up"},
+      {"text": "I would identify the shared mutable state, protect the entire read-modify-write operation with a mutex, and test for lost updates. Lock contention can limit throughput, so I would profile it before changing the design.", "label": "strong", "expected_action": "move_on"}
+    ]
+  },
+  {
+    "id": "weak",
+    "question": "Compare a process and a thread.",
+    "answers": [
+      {"text": "Both run code. Threads can share memory.", "label": "partial", "expected_action": "give_hint"},
+      {"text": "I know threads run work, but I cannot explain their memory isolation.", "label": "partial", "expected_action": "move_on"}
+    ]
+  },
+  {
+    "id": "dont_know",
+    "question": "What problem does a mutex solve?",
+    "answers": [
+      {"text": "I don't know.", "label": "dont_know", "expected_action": "move_on"},
+      {"text": "Please move on.", "label": "dont_know", "expected_action": "move_on"}
+    ]
+  }
+]

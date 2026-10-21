@@ -4,19 +4,21 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/store';
-import { dashboardApi, sessionsApi, scoresApi, resolveApiUrl } from '@/lib/api';
-import { getStudentPortalUrl } from '@/lib/utils';
+import { dashboardApi, sessionsApi, scoresApi, resolveApiUrl, getDownloadErrorMessage } from '@/lib/api';
+import { getStudentPortalUrl, downloadBlob } from '@/lib/utils';
 import { ScoreRadarChart } from '@/components/dashboard/ScoreRadarChart';
 import { AudioTranscriptPlayer, TranscriptTurn, ProctoringEvent } from '@/components/dashboard/AudioTranscriptPlayer';
+import { FeedbackEvidence, FeedbackItem } from '@/components/dashboard/FeedbackEvidence';
 import { Badge } from '@/components/ui/Badge';
 import { useToast } from '@/components/providers/ToastProvider';
-import { ArrowLeft, FileText, Save, Scale, ShieldCheck, User, Clock, CheckCircle2, FileDown } from 'lucide-react';
+import { ArrowLeft, FileText, Save, Scale, ShieldCheck, User, FileDown } from 'lucide-react';
 
 interface ReviewDetail {
   session: {
     id: string;
     status: string;
     review_status: string;
+    retention_hold: boolean;
     started_at: string | null;
     ended_at: string | null;
     total_score: number | null;
@@ -33,8 +35,9 @@ interface ReviewDetail {
   review_reasons: string[];
   score_report: null | {
     total_score: number;
-    dimensions: Record<string, { score: number | null; reason: string | null; turn_ids: string[] | null }>;
+    dimensions: Record<string, { score: number | null; reason: string | null; turn_ids: (string | number)[] | null }>;
     feedback_lines: string[] | null;
+    feedback_evidence?: FeedbackItem[];
     low_confidence_flag: boolean;
     low_confidence_reasons: string[] | null;
   };
@@ -85,6 +88,7 @@ function normalizeDetail(data: Record<string, unknown>): ReviewDetail {
       id: typeof session.id === 'string' ? session.id : '',
       status: typeof session.status === 'string' ? session.status : 'unknown',
       review_status: typeof session.review_status === 'string' ? session.review_status : 'unknown',
+      retention_hold: session.retention_hold === true,
       started_at: typeof session.started_at === 'string' ? session.started_at : null,
       ended_at: typeof session.ended_at === 'string' ? session.ended_at : null,
       total_score: typeof session.total_score === 'number' ? session.total_score : null,
@@ -188,12 +192,12 @@ export default function CandidateDossierPage() {
   const handleApplyOverride = async (event: React.FormEvent) => {
     event.preventDefault();
     const score = Number(overrideScore);
-    if (!Number.isFinite(score) || score < 0 || score > 100) {
+    if (!overrideScore.trim() || !Number.isFinite(score) || score < 0 || score > 100) {
       showToast('Enter a score between 0 and 100.', 'warning');
       return;
     }
-    if (!overrideReason.trim()) {
-      showToast('Add a reason before saving the score adjustment.', 'warning');
+    if (overrideReason.trim().length < 5) {
+      showToast('Add a reason of at least 5 characters before saving the score adjustment.', 'warning');
       return;
     }
     setIsSaving(true);
@@ -201,7 +205,7 @@ export default function CandidateDossierPage() {
       await sessionsApi.override(sessionId, { override_score: score, reason: overrideReason.trim() });
       setDetail((current) => current ? {
         ...current,
-        session: { ...current.session, override_score: score, override_reason: overrideReason.trim() },
+        session: { ...current.session, override_score: score, override_reason: overrideReason.trim(), review_status: 'overridden' },
       } : current);
       showToast('Score adjustment saved.', 'success');
     } catch {
@@ -211,34 +215,44 @@ export default function CandidateDossierPage() {
     }
   };
 
+  const [holdReason, setHoldReason] = useState('');
+  const [savingHold, setSavingHold] = useState(false);
+  const changeHold = async () => {
+    if (!detail || holdReason.trim().length < 5) return;
+    setSavingHold(true);
+    try {
+      const hold = !detail.session.retention_hold;
+      await sessionsApi.retentionHold(sessionId, hold, holdReason.trim());
+      setDetail(current => current ? { ...current, session: { ...current.session, retention_hold: hold } } : current);
+      setHoldReason(''); showToast(hold ? 'Record protected from retention deletion.' : 'Retention protection removed.', 'success');
+    } catch { showToast('Retention hold could not be saved.', 'error'); }
+    finally { setSavingHold(false); }
+  };
+
   const [isExportingPdf, setIsExportingPdf] = useState(false);
 
   const handleExportPdf = async () => {
     setIsExportingPdf(true);
-    showToast('Generating official accredited PDF examination report...', 'info');
+    showToast('Generating examination report…', 'info');
     try {
       const res = await scoresApi.getPdf(sessionId);
-      const blob = new Blob([res.data], { type: 'application/pdf' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `vivaai_accredited_report_${sessionId.slice(0, 8)}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-      showToast('Accredited PDF grade report downloaded.', 'success');
+      downloadBlob(res.data, `vivaai_report_${sessionId.slice(0, 8)}.pdf`);
+      showToast('Assessment report downloaded.', 'success');
     } catch (err: unknown) {
-      console.error('PDF export failed:', err);
-      showToast('Could not download PDF report. Evaluation may still be calculating.', 'error');
+      showToast(await getDownloadErrorMessage(err, 'Could not download the report. Please retry.'), 'error');
     } finally {
       setIsExportingPdf(false);
     }
   };
 
-  const focusTurn = (turnId: string) => {
-    setHighlightedTurnId(turnId);
-    (document.getElementById(turnId) || document.getElementById(turnId.startsWith('turn-') ? turnId : `turn-${turnId}`))?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const resolveTurn = (reference: string | number) => detail?.transcript.find(turn =>
+    typeof reference === 'number' ? turn.turn_index === reference :
+      turn.id === reference || `turn-${turn.id}` === reference);
+  const focusTurn = (reference: string | number) => {
+    const turn = resolveTurn(reference);
+    if (!turn) return;
+    setHighlightedTurnId(turn.id);
+    document.getElementById(`turn-${turn.id}`)?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
   };
 
   if (!hasHydrated || !isAuthenticated || user?.role !== 'faculty') {
@@ -249,24 +263,23 @@ export default function CandidateDossierPage() {
   if (error || !detail) return <main className="mx-auto max-w-3xl px-4 py-10"><Link href="/dashboard" className="inline-flex min-h-11 items-center gap-2 text-sm text-[var(--text-secondary)]"><ArrowLeft className="h-4 w-4" />Return to registry</Link><section className="mt-6 rounded border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] p-6 text-center"><p role="alert" className="text-sm text-[var(--status-danger)]">{error || 'Session details are unavailable.'}</p><button type="button" onClick={() => { setLoading(true); setError(null); void loadDetail(); }} className="btn-outline mt-4 text-xs">Retry</button></section></main>;
 
   const effectiveScore = detail.session.override_score ?? detail.session.total_score;
-  const sessionEvents = detail.session.tab_switch_count + detail.session.long_silence_count;
   const rubricEntries = Object.entries(detail.score_report?.dimensions || {}).filter(([, item]) => Boolean(item.reason || item.turn_ids?.length));
 
   return (
     <main className="min-h-[calc(100vh-4rem)] bg-[var(--bg-page)] px-4 py-8 text-[var(--text-primary)] transition-colors sm:px-6 sm:py-10 lg:px-8">
       <div className="mx-auto max-w-7xl space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border-default)] pb-4">
-          <Link href="/dashboard" className="inline-flex min-h-11 items-center gap-1.5 text-xs text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"><ArrowLeft aria-hidden="true" className="h-3.5 w-3.5" />Return to assessment registry</Link>
-          <div className="flex items-center gap-2.5">
+          <Link href="/dashboard" className="inline-flex min-h-11 items-center gap-1.5 text-xs text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"><ArrowLeft aria-hidden="true" className="h-3.5 w-3.5" />Back to dashboard</Link>
+          <div className="flex flex-wrap items-center gap-2.5">
             <button
               type="button"
               onClick={handleExportPdf}
-              disabled={isExportingPdf}
+              disabled={isExportingPdf || (!detail.score_report && detail.session.override_score === null)}
               className="btn-secondary text-xs px-3.5 py-1.5 min-h-[38px] flex items-center gap-2 border-[var(--border-default)] hover:border-[var(--primary)] font-semibold shadow-xs"
-              title="Download official accredited PDF grade dossier"
+              title={detail.score_report || detail.session.override_score !== null ? 'Download assessment report' : 'Wait for scoring or save a faculty assessment first'}
             >
               <FileDown className="w-4 h-4 text-emerald-600 dark:text-teal-400" />
-              <span>{isExportingPdf ? 'Exporting PDF...' : 'Export Accredited PDF'}</span>
+              <span>{isExportingPdf ? 'Exporting PDF...' : 'Download report'}</span>
             </button>
             <Badge variant={detail.session.status === 'flagged' ? 'warning' : 'neutral'}>{detail.session.status.replaceAll('_', ' ')}</Badge>
             <Badge variant="neutral">Review: {detail.session.review_status.replaceAll('_', ' ')}</Badge>
@@ -291,11 +304,11 @@ export default function CandidateDossierPage() {
                   <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--text-primary)]">
                     {detail.student.name}
                   </h1>
-                  <Badge variant="success" className="text-[10px] py-0 px-1.5">Verified</Badge>
+
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-xs">
                   <span className="font-mono text-[11px] font-semibold text-[var(--text-secondary)] bg-[var(--bg-muted)] px-2 py-0.5 rounded border border-[var(--border-subtle)]">
-                    Roll ID: {detail.student.student_id || '—'}
+                    Student ID: {detail.student.student_id || '—'}
                   </span>
                   <span className="font-mono text-[11px] font-semibold text-[var(--primary)] uppercase bg-[var(--accent-subtle)] px-2 py-0.5 rounded border border-[var(--primary)]/20">
                     {detail.viva_config.subject}
@@ -309,8 +322,8 @@ export default function CandidateDossierPage() {
 
             {/* Score & Completion Metatiles */}
             <div className="grid grid-cols-2 gap-4 border-t border-[var(--border-subtle)] pt-4 sm:flex sm:items-center sm:border-l sm:border-t-0 sm:pl-6 sm:pt-0">
-              <div className="bg-[var(--bg-muted)] p-3 rounded-lg border border-[var(--border-subtle)] min-w-[120px]">
-                <span className="block font-mono text-[10px] uppercase font-bold text-[var(--text-muted)]">Effective Score</span>
+              <div className="bg-[var(--bg-muted)] p-3 rounded-lg border border-[var(--border-subtle)] min-w-0 sm:min-w-[120px]">
+                <span className="block font-mono text-[10px] uppercase font-bold text-[var(--text-muted)]">Final mark</span>
                 <div className="flex items-baseline gap-1 mt-0.5">
                   <strong className="text-2xl font-bold text-emerald-600 dark:text-teal-400">{effectiveScore ?? '—'}</strong>
                   <span className="text-xs text-[var(--text-muted)] font-mono">/ 100</span>
@@ -322,39 +335,32 @@ export default function CandidateDossierPage() {
                 )}
               </div>
 
-              <div className="bg-[var(--bg-muted)] p-3 rounded-lg border border-[var(--border-subtle)] min-w-[140px]">
-                <span className="block font-mono text-[10px] uppercase font-bold text-[var(--text-muted)]">Completed At</span>
+              <div className="bg-[var(--bg-muted)] p-3 rounded-lg border border-[var(--border-subtle)] min-w-0 sm:min-w-[140px]">
+                <span className="block font-mono text-[10px] uppercase font-bold text-[var(--text-muted)]">Completed</span>
                 <strong className="text-xs font-semibold block mt-1 text-[var(--text-primary)]">
                   {formatDate(detail.session.ended_at || detail.session.started_at)}
                 </strong>
-                <span className="text-[10px] text-[var(--text-muted)] font-mono">UTC Session Archive</span>
+                <span className="text-[10px] text-[var(--text-muted)] font-mono">UTC</span>
               </div>
             </div>
           </div>
 
-          {/* Academic Integrity & Activity Strip */}
-          <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-[var(--border-subtle)] pt-3 text-xs text-[var(--text-secondary)]">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-[var(--bg-muted)] border border-[var(--border-subtle)] font-mono text-[11px]">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-              <span>{detail.session.tab_switch_count} Tab Switches</span>
-            </span>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-[var(--bg-muted)] border border-[var(--border-subtle)] font-mono text-[11px]">
-              <Clock className="w-3.5 h-3.5 text-[var(--primary)]" />
-              <span>{detail.session.long_silence_count} Prolonged Silences</span>
-            </span>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-teal-300 font-medium text-[11px]">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-              <span>{sessionEvents === 0 ? 'Full Academic Integrity (Zero Anomaly Flags)' : `${sessionEvents} Integrity Events Logged`}</span>
-            </span>
-          </div>
+
         </section>
 
+        <details className="mb-6 rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4">
+          <summary className="cursor-pointer text-sm font-medium">Recording retention {detail.session.retention_hold ? '· Protected' : ''}</summary>
+          <p className="mt-3 text-xs text-[var(--text-secondary)]">Protect this record during an appeal or review. Deletion remains disabled until an approved institutional policy is configured.</p>
+          <label htmlFor="hold-reason" className="mt-3 block text-xs">Reason for changing protection</label>
+          <input id="hold-reason" className="form-input mt-2" value={holdReason} maxLength={1000} onChange={event => setHoldReason(event.target.value)} />
+          <button type="button" className="btn-secondary mt-3 text-xs" disabled={savingHold || holdReason.trim().length < 5} onClick={() => void changeHold()}>{detail.session.retention_hold ? 'Remove retention hold' : 'Protect from deletion'}</button>
+        </details>
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 items-start">
           <section className="space-y-4 lg:col-span-7" aria-labelledby="transcript-heading">
             <div className="flex items-center justify-between gap-3">
               <h2 id="transcript-heading" className="flex items-center gap-2 text-base font-bold text-[var(--text-primary)]">
                 <FileText aria-hidden="true" className="h-4 w-4 text-[var(--primary)]" />
-                <span>Transcript & Audio Playback</span>
+                <span>Recording & transcript</span>
               </h2>
               <Badge variant="neutral">{detail.transcript.length} turns recorded</Badge>
             </div>
@@ -362,17 +368,17 @@ export default function CandidateDossierPage() {
               turns={detail.transcript}
               audioUrl={detail.session.audio_url}
               highlightedTurnId={highlightedTurnId}
-              proctoringEvents={detail.session.proctoring_events}
               onTurnClick={(turn) => setHighlightedTurnId(turn.id)}
             />
+            <details className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-5 text-sm"><summary className="cursor-pointer font-medium">Session activity</summary><p className="mt-3 text-xs leading-relaxed text-[var(--text-secondary)]">{detail.session.tab_switch_count} tab switches and {detail.session.long_silence_count} long silences recorded. These signals are context for review, not evidence of misconduct.</p></details>
           </section>
 
           <aside className="space-y-6 lg:col-span-5">
             <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] space-y-4 p-5 shadow-sm" aria-labelledby="rubric-heading">
               <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
                 <div>
-                  <h2 id="rubric-heading" className="text-base font-bold text-[var(--text-primary)]">Rubric Evaluation</h2>
-                  <p className="mt-0.5 text-xs text-[var(--text-secondary)]">Multi-dimensional rubric scoring across core competencies.</p>
+                  <h2 id="rubric-heading" className="text-base font-bold text-[var(--text-primary)]">Marks by dimension</h2>
+                  <p className="mt-0.5 text-xs text-[var(--text-secondary)]">Five dimensions, one consistent rubric.</p>
                 </div>
                 <Scale aria-hidden="true" className="h-5 w-5 shrink-0 text-[var(--primary)]" />
               </div>
@@ -397,7 +403,7 @@ export default function CandidateDossierPage() {
 
             <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] space-y-3 p-5 shadow-sm" aria-labelledby="evidence-heading">
               <div className="border-b border-[var(--border-subtle)] pb-3">
-                <h2 id="evidence-heading" className="text-base font-bold text-[var(--text-primary)]">Scoring Citations & Evidence</h2>
+                <h2 id="evidence-heading" className="text-base font-bold text-[var(--text-primary)]">Evidence behind the marks</h2>
                 <p className="mt-0.5 text-xs text-[var(--text-secondary)]">Select a cited turn to locate it in the verbatim transcript.</p>
               </div>
               {rubricEntries.length === 0 ? (
@@ -432,7 +438,7 @@ export default function CandidateDossierPage() {
                       {item.turn_ids?.length ? (
                         <div className="flex flex-wrap gap-1.5 pt-1">
                           {item.turn_ids.map((turnId) => {
-                            const citedTurn = detail.transcript.find((turn) => turn.id === turnId || `turn-${turn.id}` === turnId);
+                            const citedTurn = resolveTurn(turnId);
                             return (
                               <button
                                 key={turnId}
@@ -453,7 +459,7 @@ export default function CandidateDossierPage() {
               )}
             </section>
 
-            {detail.score_report?.feedback_lines?.length ? <section className="academic-dossier space-y-3 p-5"><h2 className="font-editorial text-base font-bold">Feedback</h2><ul className="list-disc space-y-2 pl-5 text-xs text-[var(--text-secondary)]">{detail.score_report.feedback_lines.map((line, index) => <li key={`${index}-${line}`}>{line}</li>)}</ul></section> : null}
+            {detail.score_report?.feedback_lines?.length ? <section className="academic-dossier space-y-4 p-5" aria-label="Feedback and evidence"><h2 className="text-base font-semibold">Feedback & evidence</h2><FeedbackEvidence items={detail.score_report.feedback_evidence || detail.score_report.feedback_lines.map(text => ({ text, citations: [], evidence_status: 'not_recorded' as const }))} onSelect={citation => focusTurn(citation.turn_id)} /></section> : null}
 
             <section className="academic-dossier space-y-4 p-5" aria-labelledby="override-heading">
               <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] pb-3"><ShieldCheck aria-hidden="true" className="h-5 w-5 text-[var(--primary)]" /><div><h2 id="override-heading" className="font-editorial text-base font-bold">Adjust score</h2><p className="mt-0.5 text-xs text-[var(--text-secondary)]">Add a reason to record a faculty adjustment.</p></div></div>

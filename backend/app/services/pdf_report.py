@@ -36,7 +36,7 @@ def generate_session_pdf_report(
     subject: str,
     started_at: Optional[datetime],
     ended_at: Optional[datetime],
-    total_score: float,
+    total_score: Optional[float],
     override_score: Optional[float],
     override_reason: Optional[str],
     review_status: str,
@@ -44,7 +44,9 @@ def generate_session_pdf_report(
     rubric_weights: Dict[str, float],
     feedback_lines: Optional[List[str]],
     proctoring_events: Optional[List[Any]],
-    reviewer_name: Optional[str] = "Prof. Priya Sharma (Lead Evaluator)",
+    reviewer_name: Optional[str] = None,
+    feedback_evidence: Optional[List[Dict[str, Any]]] = None,
+    score_withheld: bool = False,
 ) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -130,10 +132,10 @@ def generate_session_pdf_report(
     header_data = [
         [
             Paragraph("VIVAAI ACADEMIC ORAL EXAMINATION REPORT", title_style),
-            Paragraph("ACCREDITED EVALUATION DOSSIER", subtitle_style),
+            Paragraph("ASSESSMENT & REVIEW RECORD", subtitle_style),
         ],
         [
-            Paragraph("Standardized 15-Minute Technical Viva Certification & Audit Record", body_muted),
+            Paragraph("Technical Viva Assessment & Audit Record", body_muted),
             Paragraph(f"Issued: {datetime.now(timezone.utc).strftime('%d %b %Y, %H:%M UTC')}", meta_val_style),
         ],
     ]
@@ -151,15 +153,15 @@ def generate_session_pdf_report(
     story.append(HRFlowable(width="100%", thickness=2, color=c_primary, spaceAfter=12))
 
     # 2. Candidate & Session Overview Grid
-    effective_score = override_score if override_score is not None else total_score
-    score_grade = "Distinction" if effective_score >= 85 else "Merit" if effective_score >= 70 else "Pass" if effective_score >= 50 else "Needs Review"
+    effective_score = override_score if override_score is not None else (None if score_withheld else total_score)
+    score_label = f"<b>{effective_score:.1f} / 100</b>" if effective_score is not None else "Withheld - faculty review required"
 
     meta_grid = [
         [
             Paragraph("Candidate Name:", meta_label_style),
             Paragraph(_esc(student_name), meta_val_style),
             Paragraph("Total Score Awarded:", meta_label_style),
-            Paragraph(f"<b>{effective_score:.1f} / 100</b> ({score_grade})", ParagraphStyle("ScoreBig", parent=meta_val_style, fontName="Helvetica-Bold", fontSize=11, textColor=c_primary)),
+            Paragraph(score_label, ParagraphStyle("ScoreBig", parent=meta_val_style, fontName="Helvetica-Bold", fontSize=11, textColor=c_primary)),
         ],
         [
             Paragraph("Student Registration ID:", meta_label_style),
@@ -170,8 +172,8 @@ def generate_session_pdf_report(
         [
             Paragraph("Curriculum Assessment:", meta_label_style),
             Paragraph(f"{_esc(viva_title)} ({_esc(subject)})", meta_val_style),
-            Paragraph("Academic Integrity Check:", meta_label_style),
-            Paragraph(f"Proctoring Verified ({len(proctoring_events or [])} events)", meta_val_style),
+            Paragraph("Recorded activity signals:", meta_label_style),
+            Paragraph(f"{len(proctoring_events or [])} events (not a misconduct finding)", meta_val_style),
         ],
         [
             Paragraph("Session UID:", meta_label_style),
@@ -217,6 +219,8 @@ def generate_session_pdf_report(
     }
 
     for dim_key, dim_title in dimension_labels.items():
+        if dim_key not in rubric_entries:
+            continue
         entry = rubric_entries.get(dim_key, {})
         weight = rubric_weights.get(dim_key, 20)
         raw_score = entry.get("score")
@@ -227,7 +231,7 @@ def generate_session_pdf_report(
         else:
             score_str = f"{raw_score:.1f}/100"
 
-        reason = entry.get("reason") or "Demonstrated syllabus competency across evaluation turns."
+        reason = entry.get("reason") or "No dimension justification recorded."
         citations = entry.get("turn_ids") or []
         escaped_citations = [_esc(c) for c in citations[:4]]
         citation_str = f"<br/><font color='#0f766e'><b>Citations:</b> Turns [{', '.join(escaped_citations)}]</font>" if citations else ""
@@ -254,14 +258,28 @@ def generate_session_pdf_report(
             ("RIGHTPADDING", (0, 0), (-1, -1), 6),
         ])
     )
-    story.append(rubric_table)
+    if rubric_entries:
+        story.append(rubric_table)
+    else:
+        story.append(Paragraph("No AI rubric assessment is available. The faculty mark does not imply individual dimension scores.", body_muted))
+    if score_withheld:
+        story.append(Paragraph("AI assessment requires faculty review. AI dimension marks shown here are provisional and are not awarded marks.", body_muted))
     story.append(Spacer(1, 14))
 
     # 4. Qualitative Academic Feedback
     if feedback_lines:
         story.append(Paragraph("Examiner Qualitative Feedback & Growth Recommendations", heading_style))
         story.append(Spacer(1, 6))
-        fb_content = "<br/>".join([f"• {_esc(line.strip())}" for line in feedback_lines if line.strip()])
+        feedback_paragraphs = []
+        for index, line in enumerate(feedback_lines):
+            item = feedback_evidence[index] if feedback_evidence and index < len(feedback_evidence) else {}
+            citations = item.get("citations", [])
+            links = ' | '.join(
+                f'<link href="#evidence-{_esc(citation["turn_id"])}" color="#3558e8">'
+                f'Turn {citation["turn_index"] + 1} at {citation["timestamp_secs"]:.1f}s</link>'
+                for citation in citations)
+            feedback_paragraphs.append(f'• {_esc(line.strip())}<br/>' + (links or 'Evidence not recorded'))
+        fb_content = '<br/><br/>'.join(feedback_paragraphs)
         fb_table = Table([[Paragraph(fb_content, body_style)]], colWidths=[540])
         fb_table.setStyle(
             TableStyle([
@@ -281,7 +299,8 @@ def generate_session_pdf_report(
         story.append(Paragraph("Faculty Sovereign Mark Adjustment Log", heading_style))
         story.append(Spacer(1, 4))
         esc_override_reason = _esc(override_reason or "Evaluator calibration.")
-        ov_text = f"<b>Adjusted Mark:</b> {override_score:.1f}/100 | <b>Original AI Score:</b> {total_score:.1f}/100<br/><b>Academic Justification:</b> {esc_override_reason}"
+        ai_label = "Unavailable" if total_score is None else ("Withheld (requires review)" if score_withheld else f"{total_score:.1f}/100")
+        ov_text = f"<b>Faculty Mark:</b> {override_score:.1f}/100 | <b>Original AI Score:</b> {ai_label}<br/><b>Academic Justification:</b> {esc_override_reason}"
         ov_table = Table([[Paragraph(ov_text, body_style)]], colWidths=[540])
         ov_table.setStyle(
             TableStyle([
@@ -296,17 +315,21 @@ def generate_session_pdf_report(
         story.append(ov_table)
         story.append(Spacer(1, 14))
 
-    # 6. Attestation and Sign-Off Block
-    sign_block = [
-        [
-            Paragraph("<b>Faculty Evaluator Attestation:</b><br/>I hereby verify that this oral technical examination was conducted in compliance with university accreditation standards and departmental examination bylaws.", body_muted),
-            Paragraph("<b>Academic Seal & Validation:</b><br/>VivaAI Automated Verification Engine<br/>Hash: SHA-256 Validated Record", body_muted),
-        ],
-        [
-            Paragraph(f"<br/><br/>________________________________________<br/><b>{_esc(reviewer_name)}</b><br/>Lead Technical Viva Examiner", body_style),
-            Paragraph(f"<br/><br/>________________________________________<br/><b>Dean / Department Chair Signature</b><br/>Department of Computer Science & Engineering", body_style),
-        ],
-    ]
+    # Linked excerpts are resolved from the authorized transcript, not model text.
+    excerpts = {citation["turn_id"]: citation for item in (feedback_evidence or []) for citation in item.get("citations", [])}
+    if excerpts:
+        story.append(Paragraph("Transcript evidence", heading_style))
+        for citation in sorted(excerpts.values(), key=lambda row: row["turn_index"]):
+            story.append(Paragraph(f'<a name="evidence-{_esc(citation["turn_id"])}"/>'
+                f'<b>Turn {citation["turn_index"] + 1} — {citation["timestamp_secs"]:.1f}s</b><br/>'
+                + _esc(citation["text"]), body_style))
+            story.append(Spacer(1, 10))
+
+    # Record actual review state without implying accreditation or a signature.
+    sign_block = [[
+        Paragraph("<b>Review status</b><br/>" + _esc(review_status), body_muted),
+        Paragraph("<b>Faculty reviewer</b><br/>" + _esc(reviewer_name or "No faculty adjustment recorded"), body_muted),
+    ]]
     sign_table = Table(sign_block, colWidths=[270, 270])
     sign_table.setStyle(
         TableStyle([

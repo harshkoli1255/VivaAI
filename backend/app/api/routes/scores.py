@@ -6,7 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user, require_faculty
 from app.db.session import get_db
-from app.models.models import ScoreReport, VivaSession
+from app.models.models import ScoreReport, VivaSession, TranscriptTurn, User
+from app.services.feedback_evidence import feedback_evidence
 
 router = APIRouter()
 
@@ -42,6 +43,7 @@ async def get_score(
             raise HTTPException(409, "Your answers are saved. Feedback requires faculty review.")
         raise HTTPException(404, "Score not yet available")
 
+    turns = list((await db.scalars(select(TranscriptTurn).where(TranscriptTurn.session_id == session_uuid))).all())
     return {
         "session_id": session_id,
         "total_score": report.total_score,
@@ -70,6 +72,7 @@ async def get_score(
             },
         },
         "feedback_lines": report.feedback_lines,
+        "feedback_evidence": feedback_evidence(report, turns),
         "low_confidence_flag": report.low_confidence_flag,
         "low_confidence_reasons": report.low_confidence_reasons,
         "prompt_version": report.prompt_version,
@@ -84,7 +87,7 @@ async def get_score_pdf(
     db: AsyncSession = Depends(get_db),
     current: dict = Depends(get_current_user),
 ):
-    """Generate accredited PDF grade report for an examination session."""
+    """Generate an evidence-linked PDF grade report for an examination session."""
     from fastapi.responses import Response
     from sqlalchemy.orm import selectinload
     from app.services.pdf_report import generate_session_pdf_report
@@ -112,8 +115,8 @@ async def get_score_pdf(
         raise HTTPException(status_code=403, detail="Forbidden: You cannot access scores for other candidates")
 
     report = session.score_report
-    if not report:
-        raise HTTPException(404, "Score report not yet available for this session")
+    if not report and session.override_score is None:
+        raise HTTPException(404, "No report is available yet. Wait for scoring or save a faculty assessment first.")
 
     rubric_entries = {
         "conceptual": {
@@ -141,7 +144,7 @@ async def get_score_pdf(
             "reason": report.communication_reason,
             "turn_ids": report.communication_turn_ids,
         },
-    }
+    } if report else {}
 
     rubric_weights = (
         session.viva_config.rubric_weights
@@ -155,6 +158,8 @@ async def get_score_pdf(
         }
     )
 
+    evidence = feedback_evidence(report, list((await db.scalars(select(TranscriptTurn).where(TranscriptTurn.session_id == session_uuid))).all())) if report else []
+    reviewer = await db.get(User, session.override_by) if session.override_by else None
     pdf_bytes = generate_session_pdf_report(
         session_id=str(session.id),
         student_name=session.student.name if session.student else "Candidate",
@@ -163,13 +168,16 @@ async def get_score_pdf(
         subject=session.viva_config.subject if session.viva_config else "Curriculum",
         started_at=session.started_at,
         ended_at=session.ended_at,
-        total_score=report.total_score,
+        total_score=report.total_score if report else None,
         override_score=session.override_score,
         override_reason=session.override_reason,
         review_status=session.review_status.value if hasattr(session.review_status, "value") else str(session.review_status),
         rubric_entries=rubric_entries,
         rubric_weights=rubric_weights,
-        feedback_lines=report.feedback_lines or [],
+        feedback_lines=(report.feedback_lines or []) if report else [],
+        score_withheld=bool(report and report.low_confidence_flag),
+        feedback_evidence=evidence,
+        reviewer_name=reviewer.name if reviewer else None,
         proctoring_events=session.proctoring_events or [],
     )
 
@@ -177,7 +185,7 @@ async def get_score_pdf(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"attachment; filename=vivaai_accredited_report_{session_id[:8]}.pdf",
-            "Cache-Control": "no-cache",
+            "Content-Disposition": f"attachment; filename=vivaai_report_{session_id[:8]}.pdf",
+            "Cache-Control": "private, no-store",
         },
     )

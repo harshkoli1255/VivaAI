@@ -127,6 +127,101 @@ const ROBOTIC_VOICES = new Set([
 ]);
 
 class VoiceEngine {
+  private recordingBus: { context: AudioContext; destination: MediaStreamAudioDestinationNode } | null = null;
+  private wiredAudio = new WeakSet<HTMLAudioElement>();
+
+  public setRecordingBus(context: AudioContext, destination: MediaStreamAudioDestinationNode) {
+    this.recordingBus = { context, destination };
+    if (this.currentAudio) this.routeAudio(this.currentAudio);
+  }
+
+  public clearRecordingBus(context: AudioContext) {
+    if (this.recordingBus?.context === context) this.recordingBus = null;
+  }
+
+  private routeAudio(audio: HTMLAudioElement) {
+    if (!this.recordingBus || this.wiredAudio.has(audio)) return;
+    const { context, destination } = this.recordingBus;
+    const source = context.createMediaElementSource(audio);
+    source.connect(destination);
+    source.connect(context.destination);
+    this.wiredAudio.add(audio);
+    void context.resume();
+  }
+
+  private progressiveAttempted = false;
+  private progressive: { media: MediaSource; audio: HTMLAudioElement; url: string;
+    buffer: SourceBuffer | null; cursor: number; finished: boolean; played: boolean } | null = null;
+
+  private disposeProgressive() {
+    const current = this.progressive;
+    this.progressive = null;
+    if (!current) return;
+    current.audio.onplaying = null; current.audio.onended = null; current.audio.onerror = null;
+    current.audio.pause(); current.audio.removeAttribute('src'); current.audio.load();
+    URL.revokeObjectURL(current.url);
+    if (this.currentAudio === current.audio) this.currentAudio = null;
+  }
+
+  private progressiveFailure() {
+    const played = this.progressive?.played;
+    const finished = this.progressive?.finished;
+    this.disposeProgressive();
+    if (played) {
+      // Do not repeat the entire question after a partial playback failure.
+      this.isFallingBack = true;
+      this.streamCallbacks?.onError?.(new Error('Examiner audio interrupted; use Repeat question to retry.'));
+      this.streamCallbacks?.onEnd?.();
+    } else if (finished) {
+      this.finishStream(); // Container playback fallback, still routed into audit audio.
+    }
+  }
+
+  private pumpProgressive() {
+    const current = this.progressive;
+    if (!current || !current.buffer || current.buffer.updating || current.media.readyState !== 'open') return;
+    try {
+      if (current.cursor < this.streamAudioChunks.length) {
+        const bytes = new Uint8Array(this.streamAudioChunks[current.cursor++]);
+        current.buffer.appendBuffer(bytes.buffer);
+      } else if (current.finished) current.media.endOfStream();
+    } catch { this.progressiveFailure(); }
+  }
+
+  private beginProgressive() {
+    this.progressiveAttempted = true;
+    if (typeof MediaSource === 'undefined' || !MediaSource.isTypeSupported('audio/mpeg')) return;
+    const first = this.streamAudioChunks[0];
+    if (first?.[0] === 0x52 && first?.[1] === 0x49 && first?.[2] === 0x46 && first?.[3] === 0x46) return;
+    try {
+      const media = new MediaSource();
+      const url = URL.createObjectURL(media);
+      const audio = new Audio(url);
+      this.routeAudio(audio);
+      this.currentAudio = audio;
+      const current = { media, audio, url, buffer: null as SourceBuffer | null, cursor: 0, finished: false, played: false };
+      this.progressive = current;
+      media.addEventListener('sourceopen', () => {
+        if (this.progressive !== current) return;
+        try {
+          current.buffer = media.addSourceBuffer('audio/mpeg');
+          current.buffer.addEventListener('updateend', () => { if (this.progressive === current) this.pumpProgressive(); });
+          current.buffer.addEventListener('error', () => { if (this.progressive === current) this.progressiveFailure(); });
+          this.pumpProgressive();
+          void audio.play().catch(() => { if (this.progressive === current) this.progressiveFailure(); });
+        } catch { this.progressiveFailure(); }
+      }, { once: true });
+      audio.onplaying = () => {
+        if (this.progressive === current && !current.played) { current.played = true; this.streamCallbacks?.onStart?.(); }
+      };
+      audio.onended = () => {
+        if (this.progressive !== current) return;
+        this.disposeProgressive(); this.streamCallbacks?.onEnd?.();
+      };
+      audio.onerror = () => { if (this.progressive === current) this.progressiveFailure(); };
+    } catch { this.disposeProgressive(); }
+  }
+
   private playbackGeneration = 0;
   private currentAudio: HTMLAudioElement | null = null;
   private isUnlocked = false;
@@ -305,9 +400,10 @@ class VoiceEngine {
           }
           const objectUrl = URL.createObjectURL(blob);
           const audio = new Audio(objectUrl);
+          this.routeAudio(audio);
           this.currentAudio = audio;
 
-          audio.onplay = () => {
+          audio.onplaying = () => {
             callbacks?.onStart?.();
           };
           audio.onended = () => {
@@ -389,6 +485,11 @@ class VoiceEngine {
       onError?: (err: unknown) => void;
     }
   ) {
+    if (this.recordingBus) {
+      callbacks?.onError?.(new Error('Audio service unavailable. Read the question on screen or retry; device speech cannot be audit-recorded.'));
+      callbacks?.onEnd?.();
+      return;
+    }
     if (!this.synth) {
       callbacks?.onEnd?.();
       return;
@@ -463,6 +564,8 @@ class VoiceEngine {
         bytes[i] = binaryString.charCodeAt(i);
       }
       this.streamAudioChunks.push(bytes);
+      if (!this.progressiveAttempted) this.beginProgressive();
+      this.pumpProgressive();
     } catch (e) {
       console.warn('Error decoding base64 audio chunk:', e);
     }
@@ -478,6 +581,7 @@ class VoiceEngine {
     }
 
     if (this.isFallingBack) return;
+    if (this.progressive) { this.progressive.finished = true; this.pumpProgressive(); return; }
 
     if (this.streamAudioChunks.length === 0) {
       this.isFallingBack = true;
@@ -513,9 +617,10 @@ class VoiceEngine {
       const blob = new Blob(this.streamAudioChunks as BlobPart[], { type: mimeType });
       const objectUrl = URL.createObjectURL(blob);
       const audio = new Audio(objectUrl);
+      this.routeAudio(audio);
       this.currentAudio = audio;
 
-      audio.onplay = () => {
+      audio.onplaying = () => {
         this.streamCallbacks?.onStart?.();
       };
 
@@ -566,6 +671,8 @@ class VoiceEngine {
 
   public stop() {
     this.playbackGeneration += 1;
+    this.disposeProgressive();
+    this.progressiveAttempted = false;
     if (this.streamFallbackTimer) {
       clearTimeout(this.streamFallbackTimer);
       this.streamFallbackTimer = null;

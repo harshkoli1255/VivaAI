@@ -1,0 +1,22 @@
+{
+  "title": "Operating Systems Viva",
+  "subject": "Operating Systems",
+  "topics": ["Processes and threads", "Synchronization", "Debugging"],
+  "difficulty": "medium",
+  "total_duration_secs": 900,
+  "rubric_weights": {
+    "conceptual": 30,
+    "depth_reasoning": 25,
+    "problem_solving": 20,
+    "practical_project": 15,
+    "communication": 10
+  },
+  "questions": [
+    {"text": "Describe a systems project you built and your contribution.", "phase": "warm_up", "difficulty": "easy", "topic": "Projects"},
+    {"text": "Compare a process and a thread.", "phase": "fundamentals", "difficulty": "medium", "topic": "Processes and threads"},
+    {"text": "What problem does a mutex solve?", "phase": "fundamentals", "difficulty": "medium", "topic": "Synchronization"},
+    {"text": "Why can acquiring multiple locks cause a deadlock?", "phase": "depth", "difficulty": "medium", "topic": "Synchronization"},
+    {"text": "How would you debug a concurrent counter that sometimes returns the wrong total?", "phase": "applied", "difficulty": "medium", "topic": "Debugging"},
+    {"text": "Is there anything you would like to clarify or add?", "phase": "wrap_up", "difficulty": "easy", "topic": "Reflection"}
+  ]
+}

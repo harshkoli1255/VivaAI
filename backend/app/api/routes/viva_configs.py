@@ -3,15 +3,17 @@ import uuid
 import json
 import math
 from typing import List, Optional, Literal
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import require_faculty, get_current_user
 from app.db.session import get_db
-from app.models.models import VivaConfig, Question, VivaPhase, QuestionStatus
+from app.models.models import VivaConfig, Question, VivaPhase, QuestionStatus, VivaSession, SessionStatus
+from app.services.config_versions import lock_config, guard_question_mutation
 from app.services.llm_provider import get_llm_provider
 
 logger = logging.getLogger(__name__)
@@ -35,15 +37,35 @@ class GeneratePreviewQuestionsRequest(BaseModel):
     count: Optional[int] = 6
 
 
+class ConfigQuestionInput(BaseModel):
+    text: str = Field(min_length=1, max_length=1024)
+    phase: Literal["warm_up", "fundamentals", "depth", "applied", "wrap_up"] = "fundamentals"
+    topic: str = Field(default="", max_length=256)
+    difficulty: Literal["easy", "medium", "hard"] = "medium"
+    status: Literal["pending", "approved", "rejected"] = "approved"
+    is_ai_generated: bool = False
+    expected_keywords: List[str] = Field(default_factory=list, max_length=100)
+    follow_up_hints: List[str] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def trim_text(self):
+        self.text = self.text.strip()
+        if not self.text:
+            raise ValueError("Question text cannot be blank")
+        return self
+
+
 class CreateVivaConfigRequest(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     subject: str = Field(min_length=1, max_length=255)
     topics: List[str] = Field(default_factory=list)
     difficulty: Literal["easy", "medium", "hard"] = "medium"
-    total_duration_secs: int = Field(default=900, ge=60, le=7200)
+    total_duration_secs: int = Field(default=900, ge=60, le=900)
     phase_timings: Optional[dict] = None
     rubric_weights: Optional[dict] = None
-    questions: Optional[List[dict]] = None
+    questions: Optional[List[ConfigQuestionInput]] = Field(default=None, max_length=1000)
+    course_code: str = Field(default="", max_length=64)
+    is_active: bool = True
 
     @model_validator(mode="after")
     def validate_assessment(self):
@@ -91,6 +113,8 @@ class VivaConfigResponse(BaseModel):
     rubric_weights: dict
     is_active: bool
     question_count: int = 0
+    course_code: str = ""
+    revision: int = 1
 
     model_config = {"from_attributes": True}
 
@@ -123,9 +147,107 @@ async def list_viva_configs(
             rubric_weights=c.rubric_weights,
             is_active=c.is_active,
             question_count=count,
+            course_code=c.course_code,
+            revision=c.revision,
         )
         responses.append(resp)
     return responses
+
+
+DEFAULT_WEIGHTS = {"conceptual": 30, "depth_reasoning": 25, "problem_solving": 20, "practical_project": 15, "communication": 10}
+
+
+def add_bank(db, config_id, questions, actor):
+    for question in questions:
+        values = question.model_dump()
+        values["phase"] = VivaPhase(values["phase"])
+        values["status"] = QuestionStatus(values["status"])
+        db.add(Question(id=uuid.uuid4(), viva_config_id=config_id, reviewed_by=uuid.UUID(actor)
+            if question.status in ("approved", "rejected") else None, **values))
+
+
+async def config_detail(db, config, include_questions=False):
+    bank = list((await db.scalars(select(Question).where(Question.viva_config_id == config.id).order_by(Question.created_at, Question.id))).all())
+    session_count = await db.scalar(select(func.count(VivaSession.id)).where(VivaSession.viva_config_id == config.id))
+    running = await db.scalar(select(func.count(VivaSession.id)).where(VivaSession.viva_config_id == config.id, VivaSession.status == SessionStatus.in_progress))
+    data = {key: getattr(config, key) for key in ["title", "subject", "topics", "difficulty", "total_duration_secs", "phase_timings", "rubric_weights", "is_active", "course_code", "revision", "created_at", "updated_at"]}
+    data.update(id=str(config.id), previous_version_id=str(config.previous_version_id) if config.previous_version_id else None,
+        superseded_by_id=str(config.superseded_by_id) if config.superseded_by_id else None,
+        question_count=sum(q.status == QuestionStatus.approved for q in bank),
+        pending_question_count=sum(q.status == QuestionStatus.pending for q in bank),
+        session_count=session_count, in_progress_count=running)
+    if include_questions:
+        data["questions"] = [{"id": str(q.id), "text": q.text, "phase": q.phase.value, "topic": q.topic or "",
+            "difficulty": q.difficulty, "status": q.status.value, "is_ai_generated": q.is_ai_generated,
+            "expected_keywords": q.expected_keywords or [], "follow_up_hints": q.follow_up_hints or []} for q in bank]
+    return data
+
+
+@router.get("/manage")
+async def manage_vivas(db: AsyncSession = Depends(get_db), current: dict = Depends(require_faculty)):
+    configs = list((await db.scalars(select(VivaConfig).order_by(VivaConfig.created_at.desc()))).all())
+    return [await config_detail(db, config) for config in configs]
+
+
+class PublishVersionRequest(CreateVivaConfigRequest):
+    expected_updated_at: datetime
+
+
+class EnrollmentRequest(BaseModel):
+    is_active: bool
+    expected_updated_at: datetime
+
+
+def check_edit_token(config, expected):
+    normalize = lambda value: value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+    if config.superseded_by_id:
+        raise HTTPException(409, "A newer version of this viva has already been published. Return to the dashboard and open the latest version.")
+    if normalize(config.updated_at) != normalize(expected):
+        raise HTTPException(409, "This viva changed after you opened it. Reload the latest version before saving; your unsaved edits are still in this tab.")
+
+
+@router.post("/{config_id}/versions")
+async def publish_version(config_id: uuid.UUID, req: PublishVersionRequest,
+    db: AsyncSession = Depends(get_db), current: dict = Depends(require_faculty)):
+    source = await lock_config(db, config_id)
+    check_edit_token(source, req.expected_updated_at)
+    # Every publication gets a new ID, even before the first student enrolls.
+    # Resume, transcript references, and delayed scoring continue using the old ID.
+    if req.questions is None:
+        existing = (await config_detail(db, source, include_questions=True))["questions"]
+        questions = [ConfigQuestionInput(**q) for q in existing]
+    else:
+        questions = req.questions
+    if req.is_active and not any(q.status == "approved" for q in questions):
+        raise HTTPException(422, "Approve at least one question before publishing a viva")
+    config = VivaConfig(id=uuid.uuid4(), created_by=uuid.UUID(current["sub"]), title=req.title,
+        subject=req.subject, topics=req.topics, difficulty=req.difficulty, total_duration_secs=req.total_duration_secs,
+        phase_timings=req.phase_timings, rubric_weights=req.rubric_weights or source.rubric_weights,
+        course_code=req.course_code.strip(), revision=source.revision + 1, previous_version_id=source.id,
+        is_active=req.is_active)
+    db.add(config)
+    await db.flush()
+    add_bank(db, config.id, questions, current["sub"])
+    source.is_active = False
+    source.superseded_by_id = config.id
+    await db.commit()
+    return await config_detail(db, config)
+
+
+@router.patch("/{config_id}/enrollment")
+async def change_enrollment(config_id: uuid.UUID, req: EnrollmentRequest,
+    db: AsyncSession = Depends(get_db), current: dict = Depends(require_faculty)):
+    config = await lock_config(db, config_id)
+    check_edit_token(config, req.expected_updated_at)
+    if req.is_active:
+        approved = await db.scalar(select(Question.id).where(Question.viva_config_id == config.id, Question.status == QuestionStatus.approved).limit(1))
+        if not approved:
+            raise HTTPException(422, "Approve at least one question before opening enrollment")
+    config.is_active = req.is_active
+    # Explicit token change also covers an idempotent status save.
+    config.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return await config_detail(db, config)
 
 
 @router.post("/generate-preview-questions")
@@ -228,76 +350,18 @@ async def create_viva_config(
     db: AsyncSession = Depends(get_db),
     current: dict = Depends(require_faculty),
 ):
-    default_weights = {
-        "conceptual": 30, "depth_reasoning": 25,
-        "problem_solving": 20, "practical_project": 15, "communication": 10,
-    }
-    config = VivaConfig(
-        id=uuid.uuid4(),
-        created_by=uuid.UUID(current["sub"]),
-        title=req.title,
-        subject=req.subject,
-        topics=req.topics,
-        difficulty=req.difficulty,
-        total_duration_secs=req.total_duration_secs,
-        phase_timings=req.phase_timings or {
-            "warm_up": {"start": 0, "end": 60},
-            "fundamentals": {"start": 60, "end": 300},
-            "depth": {"start": 300, "end": 600},
-            "applied": {"start": 600, "end": 780},
-            "wrap_up": {"start": 780, "end": 870},
-            "scoring": {"start": 870, "end": 900},
-        },
-        rubric_weights=req.rubric_weights or default_weights,
-    )
+    if req.is_active and not any(q.status == "approved" for q in (req.questions or [])):
+        raise HTTPException(422, "Approve at least one question before publishing a viva")
+    config = VivaConfig(id=uuid.uuid4(), created_by=uuid.UUID(current["sub"]),
+        title=req.title, subject=req.subject, topics=req.topics, difficulty=req.difficulty,
+        total_duration_secs=req.total_duration_secs, phase_timings=req.phase_timings,
+        course_code=req.course_code.strip(), is_active=req.is_active,
+        rubric_weights=req.rubric_weights or DEFAULT_WEIGHTS, revision=1)
     db.add(config)
-
-    # Persist any approved questions created during faculty setup
-    added_question_count = 0
-    if req.questions:
-        for q in req.questions:
-            text = (q.get("text") or "").strip()
-            if not text:
-                continue
-            phase_str = str(q.get("phase", "fundamentals")).lower()
-            try:
-                phase = VivaPhase(phase_str)
-            except ValueError:
-                phase = VivaPhase.fundamentals
-
-            status_str = str(q.get("status", "approved")).lower()
-            try:
-                status = QuestionStatus(status_str)
-            except ValueError:
-                status = QuestionStatus.approved
-
-            new_q = Question(
-                id=uuid.uuid4(),
-                viva_config_id=config.id,
-                text=text[:1024],
-                phase=phase,
-                topic=str(q.get("topic", ""))[:256],
-                difficulty=str(q.get("difficulty", req.difficulty or "medium")),
-                status=status,
-                is_ai_generated=bool(q.get("is_ai_generated", False)),
-            )
-            db.add(new_q)
-            if status == QuestionStatus.approved:
-                added_question_count += 1
-
+    await db.flush()
+    add_bank(db, config.id, req.questions or [], current["sub"])
     await db.commit()
-    return VivaConfigResponse(
-        id=str(config.id),
-        title=config.title,
-        subject=config.subject,
-        topics=config.topics,
-        difficulty=config.difficulty,
-        total_duration_secs=config.total_duration_secs,
-        phase_timings=config.phase_timings,
-        rubric_weights=config.rubric_weights,
-        is_active=config.is_active,
-        question_count=added_question_count,
-    )
+    return await config_detail(db, config)
 
 
 @router.get("/{config_id}")
@@ -310,16 +374,7 @@ async def get_viva_config(
     config = result.scalar_one_or_none()
     if not config:
         raise HTTPException(404, "Viva config not found")
-    return {
-        "id": str(config.id),
-        "title": config.title,
-        "subject": config.subject,
-        "topics": config.topics,
-        "difficulty": config.difficulty,
-        "total_duration_secs": config.total_duration_secs,
-        "phase_timings": config.phase_timings,
-        "rubric_weights": config.rubric_weights,
-    }
+    return await config_detail(db, config, include_questions=True)
 
 
 @router.post("/{config_id}/generate-questions")
@@ -332,6 +387,8 @@ async def generate_questions(
     current: dict = Depends(require_faculty),
 ):
     """Trigger async LLM question generation from syllabus."""
+    await guard_question_mutation(db, config_id)
+    await db.commit()
     from app.workers.tasks import generate_questions_task, _generate_questions_async
     try:
         generate_questions_task.delay(str(config_id), syllabus or "", count)
@@ -379,6 +436,7 @@ async def upload_questions(
     except (ValueError, TypeError, AttributeError, UnicodeError) as exc:
         raise HTTPException(400, "Invalid question file. Use a JSON question array or a UTF-8 CSV with a text column") from exc
 
+    await guard_question_mutation(db, config_id)
     created = 0
     for q in questions_data:
         text = q.get("text") or q.get("question", "")

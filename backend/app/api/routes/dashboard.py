@@ -1,4 +1,5 @@
 """Faculty dashboard aggregation endpoints with CSV export."""
+from app.services.feedback_evidence import feedback_evidence
 import csv
 import io
 import uuid
@@ -37,16 +38,16 @@ async def dashboard_stats(
     pending_review = await db.execute(
         select(func.count(VivaSession.id)).where(VivaSession.review_status == ReviewStatus.pending)
     )
-    avg_score = await db.execute(
-        select(func.avg(VivaSession.total_score)).where(VivaSession.total_score != None)
-    )
+    effective = func.coalesce(VivaSession.override_score, VivaSession.total_score)
+    score_summary = (await db.execute(select(func.avg(effective), func.count(effective)))).one()
 
     return {
         "total_sessions": total.scalar() or 0,
         "completed_sessions": completed.scalar() or 0,
         "flagged_sessions": flagged.scalar() or 0,
         "pending_review": pending_review.scalar() or 0,
-        "average_score": round(float(avg_score.scalar() or 0), 1),
+        "average_score": round(float(score_summary[0] or 0), 1),
+        "scored_sessions": score_summary[1],
     }
 
 
@@ -164,6 +165,7 @@ async def session_detail(
             "id": str(session.id),
             "status": session.status.value,
             "review_status": session.review_status.value,
+            "retention_hold": session.retention_hold,
             "started_at": session.started_at,
             "ended_at": session.ended_at,
             "total_score": session.total_score,
@@ -172,7 +174,7 @@ async def session_detail(
             "override_at": session.override_at,
             "tab_switch_count": session.tab_switch_count,
             "long_silence_count": session.long_silence_count,
-            "proctoring_events": session.proctoring_events or [],
+            "proctoring_events": (session.proctoring_events or []) + [log.detail for log in session.audit_logs if log.action == "voice_activity_signal" and isinstance(log.detail, dict)],
             "audio_url": audio_url,
         },
         "student": {
@@ -220,6 +222,7 @@ async def session_detail(
                                   "turn_ids": session.score_report.communication_turn_ids},
             },
             "feedback_lines": session.score_report.feedback_lines,
+            "feedback_evidence": feedback_evidence(session.score_report, session.turns),
             "low_confidence_flag": session.score_report.low_confidence_flag,
             "low_confidence_reasons": session.score_report.low_confidence_reasons,
             "prompt_version": session.score_report.prompt_version,
@@ -241,6 +244,7 @@ async def session_detail(
 async def export_csv(
     status: Optional[str] = None,
     search: Optional[str] = None,
+    config_id: Optional[uuid.UUID] = None,
     db: AsyncSession = Depends(get_db),
     current: dict = Depends(require_faculty),
 ):
@@ -253,6 +257,8 @@ async def export_csv(
         )
         .order_by(VivaSession.created_at.desc())
     )
+    if config_id:
+        query = query.where(VivaSession.viva_config_id == config_id)
     if status and status.lower() != "all":
         try:
             query = query.where(VivaSession.status == SessionStatus(status))

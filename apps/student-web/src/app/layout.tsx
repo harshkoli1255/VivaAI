@@ -8,7 +8,7 @@ import { Navbar } from '@/components/ui/Navbar';
 export const metadata: Metadata = {
   title: 'VivaAI — Student Oral Examination Portal',
   description:
-    'Calibrated academic oral viva examinations with real-time acoustic dialogue, verifiable question progression, and transparent assessment records.',
+    'A simple technical viva with voice questions, fair assessment, and clear feedback.',
   keywords: ['viva', 'oral exam', 'technical interview', 'academic assessment', 'student portal'],
   authors: [{ name: 'VivaAI' }],
 };

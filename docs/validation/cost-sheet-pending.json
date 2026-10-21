@@ -1,0 +1,125 @@
+{
+  "currency": "USD",
+  "cohort_size": 350,
+  "modes": {
+    "api": {
+      "status": "pending_inputs",
+      "cost_per_viva": null,
+      "cohort_cost": null,
+      "missing_inputs": [
+        "Speech recognition",
+        "Examiner speech",
+        "Interviewer input",
+        "Interviewer output",
+        "Scorer input",
+        "Scorer output",
+        "Storage, hosting and database allocation"
+      ],
+      "components": [
+        {
+          "name": "Speech recognition",
+          "unit": "audio minute",
+          "quantity_per_viva": null,
+          "rate_per_unit": null,
+          "rate_source": null,
+          "rate_date": null,
+          "cost_per_viva": null
+        },
+        {
+          "name": "Examiner speech",
+          "unit": "1000 characters",
+          "quantity_per_viva": null,
+          "rate_per_unit": null,
+          "rate_source": null,
+          "rate_date": null,
+          "cost_per_viva": null
+        },
+        {
+          "name": "Interviewer input",
+          "unit": "million tokens",
+          "quantity_per_viva": null,
+          "rate_per_unit": null,
+          "rate_source": null,
+          "rate_date": null,
+          "cost_per_viva": null
+        },
+        {
+          "name": "Interviewer output",
+          "unit": "million tokens",
+          "quantity_per_viva": null,
+          "rate_per_unit": null,
+          "rate_source": null,
+          "rate_date": null,
+          "cost_per_viva": null
+        },
+        {
+          "name": "Scorer input",
+          "unit": "million tokens",
+          "quantity_per_viva": null,
+          "rate_per_unit": null,
+          "rate_source": null,
+          "rate_date": null,
+          "cost_per_viva": null
+        },
+        {
+          "name": "Scorer output",
+          "unit": "million tokens",
+          "quantity_per_viva": null,
+          "rate_per_unit": null,
+          "rate_source": null,
+          "rate_date": null,
+          "cost_per_viva": null
+        },
+        {
+          "name": "Storage, hosting and database allocation",
+          "unit": "viva",
+          "quantity_per_viva": 1,
+          "rate_per_unit": null,
+          "rate_source": null,
+          "rate_date": null,
+          "cost_per_viva": null
+        }
+      ]
+    },
+    "self_hosted": {
+      "status": "pending_inputs",
+      "cost_per_viva": null,
+      "cohort_cost": null,
+      "missing_inputs": [
+        "GPU allocation including idle capacity",
+        "CPU and worker allocation",
+        "Storage and database allocation"
+      ],
+      "components": [
+        {
+          "name": "GPU allocation including idle capacity",
+          "unit": "GPU hour",
+          "quantity_per_viva": null,
+          "rate_per_unit": null,
+          "rate_source": null,
+          "rate_date": null,
+          "cost_per_viva": null
+        },
+        {
+          "name": "CPU and worker allocation",
+          "unit": "CPU hour",
+          "quantity_per_viva": null,
+          "rate_per_unit": null,
+          "rate_source": null,
+          "rate_date": null,
+          "cost_per_viva": null
+        },
+        {
+          "name": "Storage and database allocation",
+          "unit": "viva",
+          "quantity_per_viva": 1,
+          "rate_per_unit": null,
+          "rate_source": null,
+          "rate_date": null,
+          "cost_per_viva": null
+        }
+      ]
+    }
+  },
+  "note": "Estimates depend on measured usage and current quoted rates; taxes and idle infrastructure must be entered explicitly."
+}

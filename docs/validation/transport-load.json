@@ -1,0 +1,1581 @@
+{
+  "scope": "Local HTTP/WebSocket + audio upload + SQLite + mock STT/TTS/LLM; not production capacity proof",
+  "platform": "macOS-15.8.1-arm64-arm-64bit",
+  "python": "3.11.16",
+  "batches": [
+    {
+      "requested_concurrency": 50,
+      "peak_connected": 50,
+      "turns_per_bot": 3,
+      "completed": 50,
+      "dropped": 0,
+      "duration_seconds": 4.45,
+      "turn_samples": 150,
+      "mock_audio_response_p50_ms": 762.15,
+      "mock_audio_response_p95_ms": 1085.61,
+      "bot_error_rate": 0.0,
+      "server_peak_rss_mib": 168.83,
+      "server_cpu_seconds": 3.47,
+      "server_average_cpu_percent_one_core": 77.96,
+      "provider_error_rates": {
+        "stt": null,
+        "tts": null,
+        "llm": null
+      },
+      "provider_error_note": "Providers are mocked. No real provider availability or GPU measurement.",
+      "errors": [],
+      "outcomes": [
+        {
+          "bot": 1,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 30,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 2,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 7,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 35,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 24,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 22,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 23,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 25,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 16,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 12,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 29,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 48,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 26,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 20,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 43,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 34,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 13,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 44,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 40,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 0,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 8,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 42,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 41,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 27,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 45,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 15,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 28,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 6,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 14,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 39,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 18,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 36,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 21,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 37,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 31,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 10,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 5,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 17,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 47,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 3,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 49,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 33,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 11,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 46,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 9,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 19,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 32,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 4,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 38,
+          "completed": true,
+          "recording_chunks": 3
+        }
+      ]
+    },
+    {
+      "requested_concurrency": 100,
+      "peak_connected": 100,
+      "turns_per_bot": 3,
+      "completed": 100,
+      "dropped": 0,
+      "duration_seconds": 7.06,
+      "turn_samples": 300,
+      "mock_audio_response_p50_ms": 829.72,
+      "mock_audio_response_p95_ms": 1584.39,
+      "bot_error_rate": 0.0,
+      "server_peak_rss_mib": 226.92,
+      "server_cpu_seconds": 6.75,
+      "server_average_cpu_percent_one_core": 95.65,
+      "provider_error_rates": {
+        "stt": null,
+        "tts": null,
+        "llm": null
+      },
+      "provider_error_note": "Providers are mocked. No real provider availability or GPU measurement.",
+      "errors": [],
+      "outcomes": [
+        {
+          "bot": 43,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 77,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 88,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 48,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 46,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 89,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 42,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 93,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 0,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 87,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 35,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 80,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 10,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 34,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 27,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 85,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 19,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 38,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 82,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 26,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 20,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 74,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 9,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 32,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 90,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 2,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 54,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 18,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 23,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 91,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 7,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 62,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 67,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 53,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 66,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 92,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 55,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 28,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 65,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 71,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 76,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 63,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 99,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 40,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 31,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 15,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 14,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 30,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 21,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 78,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 6,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 13,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 64,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 81,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 47,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 44,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 3,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 69,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 8,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 56,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 58,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 70,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 84,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 73,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 97,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 5,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 25,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 52,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 45,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 49,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 94,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 24,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 50,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 98,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 16,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 57,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 33,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 41,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 61,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 59,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 79,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 12,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 22,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 68,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 37,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 95,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 83,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 51,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 36,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 4,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 72,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 1,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 86,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 75,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 96,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 60,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 29,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 17,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 11,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 39,
+          "completed": true,
+          "recording_chunks": 3
+        }
+      ]
+    },
+    {
+      "requested_concurrency": 150,
+      "peak_connected": 150,
+      "turns_per_bot": 3,
+      "completed": 150,
+      "dropped": 0,
+      "duration_seconds": 11.11,
+      "turn_samples": 450,
+      "mock_audio_response_p50_ms": 1021.66,
+      "mock_audio_response_p95_ms": 3087.45,
+      "bot_error_rate": 0.0,
+      "server_peak_rss_mib": 263.5,
+      "server_cpu_seconds": 12.17,
+      "server_average_cpu_percent_one_core": 109.55,
+      "provider_error_rates": {
+        "stt": null,
+        "tts": null,
+        "llm": null
+      },
+      "provider_error_note": "Providers are mocked. No real provider availability or GPU measurement.",
+      "errors": [],
+      "outcomes": [
+        {
+          "bot": 112,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 63,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 130,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 44,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 118,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 109,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 100,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 35,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 134,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 58,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 13,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 103,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 20,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 53,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 89,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 68,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 61,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 102,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 127,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 0,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 59,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 69,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 37,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 26,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 140,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 110,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 25,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 142,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 147,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 64,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 73,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 108,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 133,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 80,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 22,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 51,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 119,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 146,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 145,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 23,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 90,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 29,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 3,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 10,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 34,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 70,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 113,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 148,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 115,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 86,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 71,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 128,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 67,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 101,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 50,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 21,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 28,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 32,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 144,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 16,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 45,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 62,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 104,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 77,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 57,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 132,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 129,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 19,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 131,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 31,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 141,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 126,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 105,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 41,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 55,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 83,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 46,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 30,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 48,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 81,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 27,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 87,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 12,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 125,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 117,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 92,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 138,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 114,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 15,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 2,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 93,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 72,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 96,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 78,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 137,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 39,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 84,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 66,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 97,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 74,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 121,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 8,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 36,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 56,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 149,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 123,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 79,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 65,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 7,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 85,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 49,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 139,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 135,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 52,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 106,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 95,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 76,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 143,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 33,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 122,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 24,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 11,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 75,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 9,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 91,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 17,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 94,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 4,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 124,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 82,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 14,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 42,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 1,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 88,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 40,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 54,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 98,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 111,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 5,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 60,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 116,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 43,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 18,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 6,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 47,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 120,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 107,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 136,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 99,
+          "completed": true,
+          "recording_chunks": 3
+        },
+        {
+          "bot": 38,
+          "completed": true,
+          "recording_chunks": 3
+        }
+      ]
+    }
+  ],
+  "breaking_point": 150,
+  "breaking_point_note": "First tested level with errors or mock response p95 >= 2500ms. Null means not reached in these levels; real speech remains unmeasured."
+}

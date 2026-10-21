@@ -1,5 +1,6 @@
 """Transcribe to an editable draft. Never grade an unconfirmed cloud transcript."""
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
@@ -17,7 +18,7 @@ router = APIRouter()
 
 
 @router.post("/{session_id}/speech-draft")
-async def transcribe_draft(session_id: uuid.UUID, request: Request,
+async def transcribe_draft(session_id: uuid.UUID, request: Request, language: Literal["en", "hi", "multi"] = "en",
                            db=Depends(get_db), current=Depends(get_current_user)):
     session = await owned_session(db, session_id, current)
     if current.get("role") != "student":
@@ -63,6 +64,10 @@ async def transcribe_draft(session_id: uuid.UUID, request: Request,
         provider = get_stt_provider()
         if isinstance(provider, DeepgramSTTProvider):
             provider.vocabulary = vocabulary
+            provider.language = language
+            if language in ("hi", "multi"):
+                from app.core.config import settings
+                provider.model = settings.DEEPGRAM_MULTILINGUAL_MODEL
         final = None
         async for result in provider.transcribe_stream(chunks()):
             if result.is_final:
@@ -73,6 +78,8 @@ async def transcribe_draft(session_id: uuid.UUID, request: Request,
         raise
     except Exception:
         raise HTTPException(503, "Voice transcription is unavailable. Your recording is retained by the interview recorder; retry or type your answer.") from None
+    from app.api.routes.streaming_speech import record_voice_signal
+    await record_voice_signal(session_id, final.words, {"question_id": str(last_question.question_id) if last_question and last_question.question_id else None, "question_text": last_question.text if last_question else ""})
     payload = {"session_id": str(session_id), "text": final.text, "confidence": final.confidence,
                "words": final.words[:4000], "question_text": last_question.text if last_question else "",
                "question_phase": last_question.phase.value if last_question and last_question.phase else None,

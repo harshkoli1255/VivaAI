@@ -10,6 +10,17 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
+/** Download errors arrive as Blobs too; decode the API detail for a useful message. */
+export async function getDownloadErrorMessage(error: unknown, fallback: string): Promise<string> {
+  if (axios.isAxiosError(error) && error.response?.data instanceof Blob) {
+    try {
+      const data = JSON.parse(await error.response.data.text());
+      if (typeof data.detail === 'string') return data.detail;
+    } catch { /* Non-JSON error response: use the regular fallback. */ }
+  }
+  return getApiErrorMessage(error, fallback);
+}
+
 // All browser REST traffic stays on the portal origin.
 export const resolveApiUrl = (): string => '';
 export const api = axios.create({
@@ -40,6 +51,7 @@ export const sessionsApi = {
   create: (data: { viva_config_id: string; consent_given?: boolean }) =>
     api.post('/sessions', data),
   scoring: (id: string) => api.get<{ status: string; attempts: number; message: string | null }>(`/sessions/${id}/scoring`),
+  retentionHold: (id: string, hold: boolean, reason: string) => api.post(`/sessions/${id}/retention-hold`, { hold, reason }),
   retryScoring: (id: string) => api.post(`/sessions/${id}/scoring/retry`),
   mySessions: () => api.get('/sessions/my'),
   get: (id: string) => api.get(`/sessions/${id}`),
@@ -66,6 +78,9 @@ export const sessionsApi = {
 // ── Viva Configs ──────────────────────────────────────
 export const configsApi = {
   list: () => api.get('/viva-configs'),
+  manage: () => api.get('/viva-configs/manage'),
+  publishVersion: (id: string, data: object) => api.post(`/viva-configs/${id}/versions`, data),
+  enrollment: (id: string, is_active: boolean, expected_updated_at: string) => api.patch(`/viva-configs/${id}/enrollment`, { is_active, expected_updated_at }),
   get: (id: string) => api.get(`/viva-configs/${id}`),
   create: (data: object) => api.post('/viva-configs', data),
   generatePreviewQuestions: (data: { syllabus: string; subject?: string; difficulty?: string; count?: number }) =>
@@ -98,8 +113,8 @@ export const dashboardApi = {
   stats: () => api.get('/dashboard/stats'),
   sessions: (params?: object) => api.get('/dashboard/sessions', { params }),
   sessionDetail: (id: string) => api.get(`/dashboard/sessions/${id}/detail`),
-  exportCsv: (status?: string, search?: string) =>
-    api.get('/dashboard/export/csv', { params: { status, search }, responseType: 'blob' }),
+  exportCsv: (status?: string, search?: string, config_id?: string) =>
+    api.get('/dashboard/export/csv', { params: { status, search, config_id }, responseType: 'blob' }),
 };
 
 // ── Transcript ────────────────────────────────────────

@@ -30,6 +30,11 @@ class LLMProvider(ABC):
     async def chat_json(self, messages: list[dict], temperature: float = 0.0,
                         max_tokens: int = 1024) -> dict: ...
 
+    async def chat_json_fast(self, messages: list[dict], temperature: float = 0.0,
+                             max_tokens: int = 128) -> dict:
+        """Compatibility path for test/custom providers; hosted providers select the fast model."""
+        return await self.chat_json(messages, temperature=temperature, max_tokens=max_tokens)
+
 
 # ──────────────────────────────────────────────────────────────
 # Mock provider (no API keys needed)
@@ -120,6 +125,11 @@ class MockLLMProvider(LLMProvider):
         await asyncio.sleep(0.1)
         last = messages[-1]["content"].lower() if messages else ""
 
+        # Dispatch from trusted instructions, never keywords in a candidate's answer.
+        system = ' '.join(message.get('content', '') for message in messages if message.get('role') == 'system').lower()
+        if 'answer classifier' in system:
+            return dict(self.CLASSIFIER_RESPONSES['partial'])
+
         # Scoring mock
         if "score" in last or "evaluate" in last or "rubric" in last:
             import re
@@ -127,6 +137,7 @@ class MockLLMProvider(LLMProvider):
             indices = [int(x) for x in re.findall(r"\[Turn (\d+)\] STUDENT", messages[-1]["content"])]
             for dimension in ("conceptual", "depth_reasoning", "problem_solving", "practical_project", "communication"):
                 result[f"{dimension}_turn_ids"] = indices[:3]
+            result["feedback_turn_ids"] = [indices[:1], indices[1:2] or indices[:1], indices[-1:]]
             return result
 
         # Classifier mock
@@ -168,8 +179,9 @@ class MockLLMProvider(LLMProvider):
             "feedback_lines": [
                 "Strong grasp of fundamentals with room to deepen implementation knowledge.",
                 "Problem-solving approach was methodical and well-reasoned.",
-                "Communication was clear; minor language mixing noted but did not impede understanding.",
+                "Communication was clear and structured.",
             ],
+            "feedback_turn_ids": [[], [], []],
             "low_confidence_flag": False,
             "low_confidence_reasons": [],
         }
@@ -206,11 +218,16 @@ class OpenAIProvider(LLMProvider):
             logger.warning("OpenAI/Groq chat completion unavailable (%s)", type(e).__name__)
             raise
 
+    async def chat_json_fast(self, messages: list[dict], temperature: float = 0.0,
+                             max_tokens: int = 128) -> dict:
+        return await self.chat_json(messages, temperature=temperature,
+                                    max_tokens=max_tokens, model=self.fast_model)
+
     async def chat_json(self, messages: list[dict], temperature: float = 0.0,
-                        max_tokens: int = 1024) -> dict:
+                        max_tokens: int = 1024, *, model: Optional[str] = None) -> dict:
         try:
             response = await self.client.chat.completions.create(
-                model=self.strong_model,
+                model=model or self.strong_model,
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
@@ -282,15 +299,20 @@ class AnthropicProvider(LLMProvider):
             logger.warning("Anthropic chat completion unavailable (%s)", type(e).__name__)
             raise
 
+    async def chat_json_fast(self, messages: list[dict], temperature: float = 0.0,
+                             max_tokens: int = 128) -> dict:
+        return await self.chat_json(messages, temperature=temperature,
+                                    max_tokens=max_tokens, model=self.fast_model)
+
     async def chat_json(self, messages: list[dict], temperature: float = 0.0,
-                        max_tokens: int = 1024) -> dict:
+                        max_tokens: int = 1024, *, model: Optional[str] = None) -> dict:
         try:
             system_prompt, filtered_messages = self._split_system_messages(messages)
             json_instruction = "\nIMPORTANT: Return valid parseable JSON only. Do not wrap in markdown or include extra explanations."
             system_prompt = (system_prompt + json_instruction).strip()
 
             kwargs = {
-                "model": self.strong_model,
+                "model": model or self.strong_model,
                 "messages": filtered_messages,
                 "max_tokens": max_tokens,
                 "temperature": temperature,

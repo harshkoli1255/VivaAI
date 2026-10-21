@@ -100,6 +100,11 @@ class VivaConfig(Base):
     difficulty: Mapped[str] = mapped_column(String(32), default="medium")  # easy|medium|hard
     total_duration_secs: Mapped[int] = mapped_column(Integer, default=900)  # 15 min
 
+    course_code: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    previous_version_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    superseded_by_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+
     # Phase timings in seconds from start
     phase_timings: Mapped[dict] = mapped_column(JSON, default=lambda: {
         "warm_up": {"start": 0, "end": 60},
@@ -188,6 +193,7 @@ class VivaSession(Base):
     score_prompt_version: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
 
     # Review
+    retention_hold: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     review_status: Mapped[ReviewStatus] = mapped_column(Enum(ReviewStatus), default=ReviewStatus.pending)
     override_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     override_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
@@ -277,6 +283,7 @@ class ScoreReport(Base):
 
     total_score: Mapped[float] = mapped_column(Float)  # /100
     feedback_lines: Mapped[List] = mapped_column(JSON, default=list)  # 3-5 items
+    feedback_turn_ids: Mapped[List] = mapped_column(JSON, default=list)  # One candidate-index list per line
 
     low_confidence_flag: Mapped[bool] = mapped_column(Boolean, default=False)
     low_confidence_reasons: Mapped[List] = mapped_column(JSON, default=list)
@@ -322,6 +329,7 @@ class AudioChunk(Base):
     sequence: Mapped[int] = mapped_column(Integer)
     start_secs: Mapped[float] = mapped_column(Float)
     content_type: Mapped[str] = mapped_column(String(128))
+    recording_kind: Mapped[str] = mapped_column(String(32), default="candidate", server_default="candidate")
     digest: Mapped[str] = mapped_column(String(64))
     data: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

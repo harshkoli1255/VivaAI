@@ -1,0 +1,2 @@
+# PDF streams and cross-reference offsets must remain byte-for-byte intact.
+*.pdf binary

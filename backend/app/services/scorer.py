@@ -15,7 +15,7 @@ from app.services.llm_provider import LLMProvider
 
 logger = logging.getLogger(__name__)
 
-SCORER_PROMPT_VERSION = "v2-evidence"
+SCORER_PROMPT_VERSION = "v3-feedback-evidence"
 
 SCORER_SYSTEM_PROMPT = """You are a fair, rigorous examiner scoring a technical viva transcript.
 
@@ -36,7 +36,10 @@ SCORING RULES:
 7. Distinguish an incorrect answer from a question that was never asked or evidence lost to transcription.
    When a dimension lacks sufficient evidence, explicitly state 'insufficient evidence' in its reason,
    set low_confidence_flag=true and request faculty review. Never interpret missing evidence as zero ability.
-8. Speech confidence estimates recognition quality, not knowledge or confidence as a person.
+8. Return 3-5 feedback_lines and a matching feedback_turn_ids array. Each feedback line
+   must cite at least one supporting STUDENT turn index; include only directly relevant evidence.
+   Never borrow examiner words or attach arbitrary citations to unsupported advice.
+9. Speech confidence estimates recognition quality, not knowledge or confidence as a person.
    Candidate-confirmed corrections supersede the original transcription. Do not penalize accent, pace,
    filler words, concise answers or language mixing; assess communication by understandable meaning.
 
@@ -63,6 +66,7 @@ SCHEMA:
   "practical_project_turn_ids": [int, ...],
   "communication_turn_ids": [int, ...],
   "feedback_lines": ["string", "string", "string"],
+  "feedback_turn_ids": [[int, ...], [int, ...], [int, ...]],
   "low_confidence_flag": bool,
   "low_confidence_reasons": ["string", ...]
 }"""
@@ -78,7 +82,9 @@ def _build_transcript_text(turns: List[Dict]) -> str:
         metadata = turn.get("answer_metadata") or {}
         reviewed = " [candidate reviewed transcription]" if metadata.get("reviewed") else ""
         question = f" [answered question: {metadata['question_text']}]" if metadata.get("question_text") else ""
-        lines.append(f"[Turn {turn['turn_index']}] {speaker}{conf}{label}{reviewed}{question}: {turn['text']}")
+        timestamp = turn.get('timestamp_secs')
+        stamp = f" [time: {timestamp:.1f}s]" if isinstance(timestamp, (int, float)) else ''
+        lines.append(f"[Turn {turn['turn_index']}] {speaker}{stamp}{conf}{label}{reviewed}{question}: {turn['text']}")
     return "\n".join(lines)
 
 
@@ -210,6 +216,23 @@ async def score_session(
         if not raw[turns_key] or "insufficient evidence" in raw[reason_key].lower():
             review_reasons.append(f"Insufficient candidate evidence for {dim.replace('_', ' ')}.")
 
+    feedback = raw.get("feedback_lines", [])
+    feedback_ids = raw.get("feedback_turn_ids", [])
+    if not 3 <= len(feedback) <= 5 or any(not line.strip() for line in feedback):
+        review_reasons.append("Feedback must contain three to five non-empty, evidence-based lines.")
+    if not isinstance(feedback_ids, list) or len(feedback_ids) != len(feedback):
+        review_reasons.append("Feedback evidence is missing or does not match the feedback lines.")
+        feedback_ids = []
+    validated_feedback_ids = []
+    for index, line in enumerate(feedback):
+        claimed = feedback_ids[index] if index < len(feedback_ids) else []
+        valid = isinstance(claimed, list) and bool(claimed) and all(
+            type(turn_id) is int and turn_id in valid_indices for turn_id in claimed)
+        if not valid:
+            review_reasons.append(f"Feedback line {index + 1} lacks valid candidate transcript evidence.")
+        validated_feedback_ids.append(list(dict.fromkeys(claimed)) if valid else [])
+    raw["feedback_turn_ids"] = validated_feedback_ids
+
     if "low_confidence_flag" not in raw:
         raw["low_confidence_flag"] = False
 
@@ -234,10 +257,5 @@ async def score_session(
             raw["low_confidence_flag"] = True
             raw["low_confidence_reasons"] = low_conf_reasons
 
-    # Ensure feedback has 3-5 lines
-    feedback = raw.get("feedback_lines", [])
-    while len(feedback) < 3:
-        feedback.append("Scoring completed. Please review session manually.")
-    raw["feedback_lines"] = feedback[:5]
 
     return raw

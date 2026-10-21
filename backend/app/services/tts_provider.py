@@ -284,6 +284,14 @@ class OpenAITTSProvider(TTSProvider):
 
 class MockTTSProvider(TTSProvider):
     async def synthesize(self, text: str, voice_id: Optional[str] = None) -> AsyncIterator[bytes]:
+        fixture = os.environ.get('VIVAAI_TEST_TTS_FILE')
+        if settings.APP_ENV == 'test' and fixture:
+            from pathlib import Path
+            data = await asyncio.to_thread(Path(fixture).read_bytes)
+            for offset in range(0, len(data), 1024):
+                yield data[offset:offset + 1024]
+                await asyncio.sleep(.06)
+            return
         sample_rate = 16000
         duration = 0.5
         num_samples = int(sample_rate * duration)
@@ -295,7 +303,11 @@ class MockTTSProvider(TTSProvider):
             sample_rate, sample_rate * 2, 2, 16,
             b"data", data_size,
         )
-        yield bytes(header) + bytes(data_size)
+        samples = bytes(data_size)
+        if settings.APP_ENV == 'test' and os.environ.get('VIVAAI_TEST_TONE') == '1':
+            import math
+            samples = b''.join(struct.pack('<h', round(5000 * math.sin(2 * math.pi * 880 * i / sample_rate))) for i in range(num_samples))
+        yield bytes(header) + samples
 
 
 def get_tts_provider(voice_id: Optional[str] = None) -> TTSProvider:

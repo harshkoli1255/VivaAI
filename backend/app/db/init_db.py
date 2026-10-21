@@ -27,6 +27,21 @@ async def init_db():
         # Create all tables if they don't exist (dev only)
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            from sqlalchemy import inspect, text
+            columns = await conn.run_sync(lambda sync: {column["name"] for column in inspect(sync).get_columns("score_reports")})
+            if "feedback_turn_ids" not in columns:
+                await conn.execute(text("ALTER TABLE score_reports ADD COLUMN feedback_turn_ids JSON NOT NULL DEFAULT '[]'"))
+            config_columns = await conn.run_sync(lambda sync: {column["name"] for column in inspect(sync).get_columns("viva_configs")})
+            config_uuid_type = "UUID" if conn.dialect.name == "postgresql" else "CHAR(32)"
+            for name, definition in {"course_code": "VARCHAR(64) NOT NULL DEFAULT ''", "revision": "INTEGER NOT NULL DEFAULT 1", "previous_version_id": config_uuid_type, "superseded_by_id": config_uuid_type}.items():
+                if name not in config_columns:
+                    await conn.execute(text(f"ALTER TABLE viva_configs ADD COLUMN {name} {definition}"))
+            session_columns = await conn.run_sync(lambda sync: {column["name"] for column in inspect(sync).get_columns("viva_sessions")})
+            if "retention_hold" not in session_columns:
+                await conn.execute(text("ALTER TABLE viva_sessions ADD COLUMN retention_hold BOOLEAN NOT NULL DEFAULT false"))
+            audio_columns = await conn.run_sync(lambda sync: {column["name"] for column in inspect(sync).get_columns("audio_chunks")})
+            if "recording_kind" not in audio_columns:
+                await conn.execute(text("ALTER TABLE audio_chunks ADD COLUMN recording_kind VARCHAR(32) NOT NULL DEFAULT 'candidate'"))
             try:
                 from sqlalchemy import text
                 await conn.execute(text("ALTER TABLE viva_sessions ADD COLUMN proctoring_events JSON DEFAULT '[]'"))

@@ -1,0 +1,55 @@
+{
+  "synthetic": true,
+  "mock_browser": {
+    "passed": true,
+    "real_providers": false,
+    "speech_draft_editing": true,
+    "feedback_evidence_links": true,
+    "theme_consistency": true,
+    "interactive_preview": true,
+    "progressive_ai_playback": true,
+    "retention_hold": true,
+    "code_snippet": true,
+    "streaming_transcription": true,
+    "mixed_conversation_recording": true,
+    "backend_audio_transcription": false,
+    "reviewable_cloud_speech": false,
+    "live_speech_interruption": false,
+    "captures_after_reload": 2,
+    "api_restart_before_scoring": true,
+    "recording_playback": true,
+    "mobile_typed_interview": true,
+    "browser_errors": []
+  },
+  "real_provider_browser": {
+    "passed": true,
+    "real_providers": true,
+    "speech_draft_editing": false,
+    "feedback_evidence_links": false,
+    "theme_consistency": true,
+    "interactive_preview": true,
+    "progressive_ai_playback": false,
+    "retention_hold": true,
+    "code_snippet": false,
+    "streaming_transcription": true,
+    "mixed_conversation_recording": true,
+    "backend_audio_transcription": true,
+    "reviewable_cloud_speech": true,
+    "live_speech_interruption": true,
+    "captures_after_reload": 2,
+    "api_restart_before_scoring": true,
+    "recording_playback": true,
+    "mobile_typed_interview": true,
+    "browser_errors": []
+  },
+  "mixed_audio_tones": {
+    "candidate_440hz": 2535.3645237660717,
+    "examiner_880hz": 4928.845542959084
+  },
+  "progressive_playback": {
+    "passed": true,
+    "progressive_ai_playback": true,
+    "scope": "Synthetic MP3 audible playback before final chunk; unlock/readiness audio excluded"
+  },
+  "limitations": "Synthetic integration evidence only; no human WER, marking agreement, latency percentiles or production capacity claim. False check fields in real_provider_browser mean outside that test scope, not a passing assertion."
+}

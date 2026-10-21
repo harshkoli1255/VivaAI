@@ -7,22 +7,7 @@ import { useAuthStore } from '@/store';
 import { configsApi, sessionsApi } from '@/lib/api';
 import { getFacultyPortalUrl } from '@/lib/utils';
 import { MicCheck } from '@/components/interview/MicCheck';
-import { Badge } from '@/components/ui/Badge';
-import {
-  ShieldCheck,
-  Clock,
-  BookOpen,
-  ArrowRight,
-  CheckCircle2,
-  Scale,
-  FileText,
-  User,
-  AlertCircle,
-  Lock,
-  Headphones,
-  Check,
-  Activity,
-} from 'lucide-react';
+import { ShieldCheck, Clock, BookOpen, ArrowRight } from 'lucide-react';
 
 interface VivaConfig {
   id: string;
@@ -74,9 +59,16 @@ export default function InterviewSetupPage() {
   const [consentGiven, setConsentGiven] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [invitationNotice, setInvitationNotice] = useState('');
+  const [vivaQuery, setVivaQuery] = useState('');
+  const [resumable, setResumable] = useState<Array<{ id: string; viva_title?: string; elapsed_secs: number }>>([]);
 
   // Authentication check
   useEffect(() => {
+    const invited = new URLSearchParams(window.location.search).get('viva');
+    if (invited && /^[0-9a-f-]{36}$/i.test(invited)) {
+      try { sessionStorage.setItem('vivaai_invited_viva', invited); } catch { /* The URL still works for signed-in students. */ }
+    }
     if (!hasHydrated) return;
     if (!isAuthenticated) {
       router.replace('/login');
@@ -96,9 +88,14 @@ export default function InterviewSetupPage() {
         const data = Array.isArray(res.data) ? res.data : res.data?.items || [];
         if (active) {
           setConfigs(data);
-          if (data.length > 0) {
-            setSelectedConfigId((prev) => (prev ? prev : data[0].id));
-          }
+          let invited = new URLSearchParams(window.location.search).get('viva');
+          try { invited = invited || sessionStorage.getItem('vivaai_invited_viva'); } catch { /* URL-only invitations remain usable. */ }
+          if (invited) {
+            const match = data.find((config: VivaConfig) => config.id === invited);
+            setSelectedConfigId(match ? match.id : '');
+            setInvitationNotice(match ? 'Your shared viva is selected. Check your audio and give consent when you are ready.' : 'This shared viva is not currently open to new interviews. You can resume an existing interview below, choose another viva, or ask faculty for an updated link.');
+            try { sessionStorage.removeItem('vivaai_invited_viva'); } catch { /* Optional storage. */ }
+          } else if (data.length > 0) setSelectedConfigId(prev => data.some((config: VivaConfig) => config.id === prev) ? prev : data[0].id);
         }
       } catch {
         if (active) setConfigsError('Could not load scheduled examinations. Please check your network and retry.');
@@ -109,6 +106,14 @@ export default function InterviewSetupPage() {
     loadConfigs();
     return () => { active = false; };
   }, [configRetry]);
+
+  useEffect(() => {
+    if (!hasHydrated || !isAuthenticated || user?.role !== 'student') return;
+    let active = true;
+    sessionsApi.mySessions().then(({ data }) => { if (active) setResumable(data.filter((session: { status: string }) => ['scheduled', 'in_progress'].includes(session.status))); }).catch(() => { /* History is also available from the dedicated Results page. */ });
+    return () => { active = false; };
+  }, [hasHydrated, isAuthenticated, user?.role]);
+  const visibleConfigs = configs.filter(config => `${config.title} ${config.subject} ${config.topics.join(' ')}`.toLowerCase().includes(vivaQuery.toLowerCase().trim()));
 
   const selectedConfig = useMemo(
     () => configs.find((c) => c.id === selectedConfigId),
@@ -162,360 +167,27 @@ export default function InterviewSetupPage() {
   }
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-[var(--bg-page)] text-[var(--text-primary)] py-6 sm:py-10 px-4 sm:px-6 lg:px-8 transition-colors">
-      <div className="max-w-6xl mx-auto space-y-6">
-
-        {/* ── Top Header Bar with Candidate Identity Chip ── */}
-        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-5 sm:p-6 shadow-sm">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            {/* Title & Step Track */}
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono font-bold tracking-wide uppercase bg-[var(--accent-subtle)] text-[var(--primary)] border border-[var(--primary)]/20">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Step 1 of 2: Readiness & System Check
-                </span>
-                <span className="text-xs text-[var(--text-muted)] font-medium">
-                  • Next: Live AI Examination
-                </span>
-              </div>
-              <h1 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight text-[var(--text-primary)]">
-                Oral Examination Check-in & System Readiness
-              </h1>
-              <p className="text-xs sm:text-sm text-[var(--text-secondary)] max-w-2xl leading-relaxed">
-                Confirm your scheduled viva module, calibrate your audio hardware, and accept academic standards before entering the session.
-              </p>
-              <Link href="/sessions" className="inline-block text-sm font-semibold text-[var(--primary)] underline">Resume an interview or view past feedback</Link>
-            </div>
-
-            {/* Candidate Identity Pill */}
-            <div className="flex items-center gap-3 bg-[var(--bg-muted)] border border-[var(--border-subtle)] p-3 rounded-lg shrink-0 self-start md:self-auto">
-              <div className="relative">
-                <div className="w-10 h-10 rounded-full bg-[var(--accent-subtle)] text-[var(--primary)] flex items-center justify-center font-bold border border-[var(--primary)]/20">
-                  <User className="w-5 h-5" />
-                </div>
-                <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-[var(--bg-card)] flex items-center justify-center">
-                  <Check className="w-2 h-2 text-white stroke-[3]" />
-                </div>
-              </div>
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <span className="font-semibold text-sm text-[var(--text-primary)]">{user?.name}</span>
-                  <Badge variant="success" className="text-[10px] py-0 px-1.5">Verified</Badge>
-                </div>
-                <div className="font-mono text-xs text-[var(--text-muted)] mt-0.5">
-                  Roll ID: <span className="font-semibold text-[var(--text-secondary)]">{user?.student_id || '—'}</span>
-                </div>
-              </div>
-            </div>
-          </div>
+    <div className="mx-auto max-w-6xl px-5 py-10 sm:px-8 sm:py-12">
+      <div className="workspace-banner mb-9 flex flex-wrap items-end justify-between gap-4">
+        <div><p className="eyebrow mb-3">Welcome, {user?.name?.split(' ')[0]}</p><h1 className="text-3xl sm:text-4xl">Let’s get you ready.</h1><p className="mt-3 text-sm text-[var(--text-secondary)]">Choose your viva, check your audio, and you’re all set.</p></div>
+        <Link href="/sessions" className="text-sm font-medium text-[var(--primary)]">Past interviews & feedback</Link>
+      </div>
+      {resumable.length > 0 && <section aria-label="Continue your interview" className="academic-dossier mb-7 p-5 sm:p-6"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="eyebrow mb-2">Continue where you left off</p><h2 className="text-lg font-semibold">Your saved interviews</h2></div><Link href="/sessions" className="text-sm text-[var(--primary)]">View all interviews →</Link></div><div className="mt-4 space-y-3">{resumable.slice(0,2).map(session => <div key={session.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-[var(--bg-muted)] p-4"><div><p className="text-sm font-semibold">{session.viva_title || 'Saved viva'}</p><p className="mt-1 text-xs text-[var(--text-secondary)]">{Math.floor(session.elapsed_secs / 60)}m {Math.floor(session.elapsed_secs % 60)}s saved · keeps your original viva settings</p></div><Link href={`/interview/${session.id}`} className="btn-secondary text-xs">Resume interview<ArrowRight aria-hidden="true" className="h-3.5 w-3.5" /></Link></div>)}</div></section>}
+      {invitationNotice && <p role="status" className="mb-6 rounded-xl border border-[var(--status-info-border)] bg-[var(--status-info-bg)] p-4 text-sm leading-relaxed text-[var(--status-info)]">{invitationNotice}</p>}
+      <div className="grid items-start gap-7 lg:grid-cols-[1fr_1.1fr]">
+        <div className="space-y-7">
+          <section className="academic-dossier p-6 sm:p-7"><div className="mb-5 flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#e7edff] text-sm font-bold text-[#3558e8]">1</span><h2 className="text-lg">Choose your viva</h2></div>
+            {configsLoading ? <p role="status" className="py-6 text-sm text-[var(--text-secondary)]">Loading your vivas…</p> : configsError ? <div role="alert"><p className="text-sm text-[var(--status-danger)]">{configsError}</p><button onClick={() => setConfigRetry(v => v + 1)} className="btn-secondary mt-3">Try again</button></div> : configs.length === 0 ? <p className="text-sm text-[var(--text-secondary)]">No vivas are available yet. Please contact your faculty.</p> : <div className="space-y-3"><label className="sr-only" htmlFor="student-viva-search">Search available vivas</label><input id="student-viva-search" className="form-input mb-2" type="search" placeholder="Find a viva by subject or topic…" value={vivaQuery} onChange={event => setVivaQuery(event.target.value)} />{visibleConfigs.length === 0 && <p className="py-3 text-sm text-[var(--text-muted)]">No vivas match your search.</p>}{visibleConfigs.map(config => <button key={config.id} onClick={() => { setSelectedConfigId(config.id); setInvitationNotice(''); }} aria-pressed={config.id === selectedConfigId} className={`w-full rounded-2xl border p-5 text-left transition-colors ${config.id === selectedConfigId ? 'border-[var(--primary)] bg-[var(--accent-subtle)]' : 'border-[var(--border-default)] hover:bg-[var(--bg-muted)]'}`}>
+              <div className="flex items-center justify-between gap-3"><span className="text-xs font-semibold text-[var(--primary)]">{config.subject}</span><span className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)]"><Clock className="h-3.5 w-3.5" />{Math.round(config.total_duration_secs / 60)} min</span></div><h3 className="mt-3 text-base font-semibold">{config.title}</h3><p className="mt-2 text-xs leading-relaxed text-[var(--text-secondary)]">{parseTopicTags(config.topics).join(' / ')}</p>
+            </button>)}</div>}
+          </section>
+          <section className="readiness-note rounded-[20px] p-6 sm:p-7"><h2 className="text-lg">A few things to know</h2><ul className="mt-4 space-y-4 text-sm leading-relaxed"><li className="flex gap-3"><Clock className="mt-0.5 h-4 w-4 shrink-0" /><span>Your viva lasts {Math.round((selectedConfig?.total_duration_secs || 900) / 60)} minutes. The timer stays visible throughout.</span></li><li className="flex gap-3"><BookOpen className="mt-0.5 h-4 w-4 shrink-0" /><span>Explain your thinking. It’s okay to say “I don’t know” and move on.</span></li><li className="flex gap-3"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" /><span>Audio and transcripts are saved so faculty can review your marks fairly.</span></li></ul></section>
         </div>
-
-        {/* ── Two-Column Main Grid ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-
-          {/* ════ LEFT COLUMN: Assessment Dossier & Academic Standards ════ */}
-          <div className="lg:col-span-6 space-y-6">
-
-            {/* 1. Scheduled Examination Module Selection */}
-            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-5 sm:p-6 shadow-sm space-y-4">
-              <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
-                <div className="flex items-center gap-2">
-                  <BookOpen className="w-4 h-4 text-[var(--primary)]" />
-                  <h2 className="text-sm font-bold tracking-tight text-[var(--text-primary)]">
-                    1. Scheduled Examination Module
-                  </h2>
-                </div>
-                <Badge variant="neutral">
-                  {configs.length} {configs.length === 1 ? 'Module' : 'Modules'} Available
-                </Badge>
-              </div>
-
-              <div className="space-y-3">
-                {configsLoading ? (
-                  <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-muted)] p-6 text-center text-sm text-[var(--text-secondary)]">
-                    <div className="w-5 h-5 border-2 border-[var(--primary)] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-                    <span>Loading scheduled viva modules...</span>
-                  </div>
-                ) : configsError ? (
-                  <div className="rounded-lg border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] p-4 text-xs text-[var(--status-danger)]" role="alert">
-                    <p className="font-medium">{configsError}</p>
-                    <button
-                      type="button"
-                      onClick={() => setConfigRetry((v) => v + 1)}
-                      className="mt-2 text-xs font-semibold underline"
-                    >
-                      Retry Connection
-                    </button>
-                  </div>
-                ) : configs.length === 0 ? (
-                  <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-muted)] p-6 text-center text-xs text-[var(--text-muted)]">
-                    No examination modules are currently assigned to your account. Please contact your faculty administrator.
-                  </div>
-                ) : (
-                  configs.map((config) => {
-                    const isSelected = config.id === selectedConfigId;
-                    const topicTags = parseTopicTags(config.topics);
-
-                    return (
-                      <button
-                        key={config.id}
-                        type="button"
-                        aria-pressed={isSelected}
-                        onClick={() => setSelectedConfigId(config.id)}
-                        className={`w-full text-left rounded-lg p-4 sm:p-4.5 border transition-all relative ${
-                          isSelected
-                            ? 'border-emerald-500 dark:border-teal-400 bg-emerald-500/[0.04] dark:bg-teal-500/[0.08] ring-1 ring-emerald-500/30 shadow-sm'
-                            : 'border-[var(--border-default)] bg-[var(--bg-card)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-card-hover)]'
-                        }`}
-                      >
-                        <div className="space-y-2.5">
-                          {/* Card Header: Subject Tag & Duration */}
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-mono text-[11px] font-semibold text-[var(--primary)] uppercase tracking-wider bg-[var(--accent-subtle)] border border-[var(--primary)]/20 px-2 py-0.5 rounded">
-                              {config.subject}
-                            </span>
-                            <div className="flex items-center gap-2">
-                              <span className="inline-flex items-center gap-1 font-mono text-xs text-[var(--text-muted)] bg-[var(--bg-muted)] border border-[var(--border-subtle)] px-2 py-0.5 rounded">
-                                <Clock className="w-3 h-3 text-[var(--primary)]" />
-                                {Math.max(1, Math.round((config.total_duration_secs || 900) / 60))} min
-                              </span>
-                              <div
-                                className={`w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${
-                                  isSelected
-                                    ? 'border-emerald-500 bg-emerald-500 text-white'
-                                    : 'border-[var(--border-strong)] bg-transparent'
-                                }`}
-                              >
-                                {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Exam Title */}
-                          <div>
-                            <h3 className="text-sm sm:text-base font-bold text-[var(--text-primary)]">
-                              {config.title}
-                            </h3>
-                          </div>
-
-                          {/* Syllabus Topic Badges */}
-                          <div className="space-y-1 pt-0.5">
-                            <span className="text-[11px] font-medium text-[var(--text-muted)]">
-                              Syllabus Competencies:
-                            </span>
-                            <div className="flex flex-wrap gap-1.5 pt-1">
-                              {topicTags.map((tag, i) => (
-                                <span
-                                  key={i}
-                                  className="inline-flex items-center px-2 py-0.5 rounded text-[11px] bg-[var(--bg-muted)] border border-[var(--border-subtle)] text-[var(--text-secondary)] font-medium"
-                                >
-                                  {tag}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
-            {/* 2. Academic Standards & Protocol */}
-            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-5 sm:p-6 shadow-sm space-y-4">
-              <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-[var(--primary)]" />
-                  <h2 className="text-sm font-bold tracking-tight text-[var(--text-primary)]">
-                    Academic Standards & Protocol
-                  </h2>
-                </div>
-                <Badge variant="neutral">Official Guidelines</Badge>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                <div className="p-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-muted)]/50 space-y-1">
-                  <div className="flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-[var(--primary)]" />
-                    <span className="font-semibold text-xs text-[var(--text-primary)]">{Math.round((selectedConfig?.total_duration_secs || 900) / 60)}-Minute Clock</span>
-                  </div>
-                  <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
-                    Strict server-timed question pacing ensures equal opportunity for all candidates.
-                  </p>
-                </div>
-
-                <div className="p-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-muted)]/50 space-y-1">
-                  <div className="flex items-center gap-1.5">
-                    <Scale className="w-3.5 h-3.5 text-[var(--primary)]" />
-                    <span className="font-semibold text-xs text-[var(--text-primary)]">Zero-Penalty Advance</span>
-                  </div>
-                  <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
-                    State &quot;I don&apos;t know&quot; clearly to advance instantly without negative penalty.
-                  </p>
-                </div>
-
-                <div className="p-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-muted)]/50 space-y-1">
-                  <div className="flex items-center gap-1.5">
-                    <FileText className="w-3.5 h-3.5 text-[var(--primary)]" />
-                    <span className="font-semibold text-xs text-[var(--text-primary)]">Transcript Audit</span>
-                  </div>
-                  <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
-                    Verbatim audio and transcripts are archived for faculty verification and scoring audit.
-                  </p>
-                </div>
-
-                <div className="p-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-muted)]/50 space-y-1">
-                  <div className="flex items-center gap-1.5">
-                    <Activity className="w-3.5 h-3.5 text-[var(--primary)]" />
-                    <span className="font-semibold text-xs text-[var(--text-primary)]">Adaptive AI Examiner</span>
-                  </div>
-                  <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
-                    Speak naturally when the AI pauses. The system will adapt follow-up depth dynamically.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-          </div>
-
-          {/* ════ RIGHT COLUMN: Hardware Calibration, Honor Pledge & Launch ════ */}
-          <div className="lg:col-span-6 space-y-6">
-
-            {/* 1. Audio Hardware Diagnostic Console */}
-            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-5 sm:p-6 shadow-sm space-y-4">
-              <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
-                <div className="flex items-center gap-2">
-                  <Headphones className="w-4 h-4 text-[var(--primary)]" />
-                  <h2 className="text-sm font-bold tracking-tight text-[var(--text-primary)]">
-                    2. Audio & Hardware Pre-Flight
-                  </h2>
-                </div>
-                <Badge variant={hardwareReady ? 'success' : 'neutral'} dot={hardwareReady}>
-                  {hardwareReady ? 'All Systems Go' : 'Hardware Check Required'}
-                </Badge>
-              </div>
-
-              {/* Interactive Audio Check Component */}
-              <MicCheck onReadyChange={setHardwareReady} />
-
-              {/* System Diagnostics Strip */}
-              <div className="pt-2 border-t border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--text-muted)] font-mono">
-                <span className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                  Audio or typed answers
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                  Permission checked before recording
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                  Connection checked on entry
-                </span>
-              </div>
-            </div>
-
-            {/* 2. Candidate Honor Pledge & Entry Gateway */}
-            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-5 sm:p-6 shadow-sm space-y-4">
-              <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-3">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-[var(--primary)]" />
-                  <h2 className="text-sm font-bold tracking-tight text-[var(--text-primary)]">
-                    3. Candidate Honor Pledge & Launch
-                  </h2>
-                </div>
-                <Badge variant={consentGiven ? 'success' : 'neutral'}>
-                  {consentGiven ? 'Pledged' : 'Pending'}
-                </Badge>
-              </div>
-
-              {/* Consent Checkbox Box */}
-              <label className="flex items-start gap-3 p-4 rounded-lg bg-[var(--bg-muted)]/70 border border-[var(--border-default)] hover:border-[var(--border-strong)] cursor-pointer select-none transition-colors">
-                <input
-                  id="exam-consent"
-                  name="consent"
-                  type="checkbox"
-                  checked={consentGiven}
-                  onChange={(e) => setConsentGiven(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-[var(--border-strong)] text-[var(--primary)] focus:ring-[var(--primary)] cursor-pointer shrink-0"
-                />
-                <span className="text-xs text-[var(--text-primary)] leading-relaxed">
-                  I certify that I am <strong className="text-[var(--text-primary)] font-bold">{user?.name}</strong>{user?.student_id ? ` (ID: ${user.student_id})` : ''}. I pledge to complete this oral viva examination independently without external assistance, and agree to verbatim transcript generation and session audio tracking for faculty review.
-                </span>
-              </label>
-
-              {/* Readiness Status Message */}
-              <div className="text-xs min-h-[22px] flex items-center" aria-live="polite">
-                {!hardwareReady && (
-                  <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 font-medium">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    Complete the audio checks or select typed answers before starting.
-                  </span>
-                )}
-                {hardwareReady && !consentGiven && (
-                  <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 font-medium">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    Check the candidate honor pledge box above to unlock entry.
-                  </span>
-                )}
-                {hardwareReady && consentGiven && selectedConfigId && (
-                  <span className="text-emerald-700 dark:text-teal-400 font-semibold flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                    All checks verified. Click below to enter your live viva room.
-                  </span>
-                )}
-              </div>
-
-              {submitError && (
-                <div role="alert" className="rounded-lg border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] p-3 text-xs text-[var(--status-danger)] flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>{submitError}</span>
-                </div>
-              )}
-
-              {/* Primary Call to Action Button */}
-              <button
-                type="button"
-                onClick={handleStartExam}
-                disabled={!canStart}
-                className={`w-full py-3.5 px-6 rounded-lg font-bold text-sm tracking-wide transition-all flex items-center justify-center gap-2 min-h-[50px] shadow-sm ${
-                  canStart
-                    ? 'bg-emerald-600 hover:bg-emerald-500 dark:bg-teal-500 dark:hover:bg-teal-400 text-white dark:text-slate-950 shadow-emerald-950/20 hover:shadow-md hover:scale-[1.01] active:scale-[0.99] cursor-pointer'
-                    : 'bg-[var(--bg-muted)] text-[var(--text-muted)] border border-[var(--border-default)] cursor-not-allowed opacity-75'
-                }`}
-              >
-                {submitting ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                    <span>Preparing Secure Examination Room...</span>
-                  </>
-                ) : canStart ? (
-                  <>
-                    <span>Enter Live Examination Room</span>
-                    <ArrowRight className="w-4 h-4 stroke-[2.5]" />
-                  </>
-                ) : (
-                  <>
-                    <Lock className="w-4 h-4" />
-                    <span>Complete Checks to Enter Exam Room</span>
-                  </>
-                )}
-              </button>
-
-              {/* Subtle Module Summary Pill */}
-              {selectedConfig && (
-                <p className="text-[11px] text-center text-[var(--text-muted)]">
-                  Selected: <span className="font-semibold text-[var(--text-secondary)]">{selectedConfig.title}</span> ({selectedConfig.subject})
-                </p>
-              )}
-            </div>
-
-          </div>
-
-        </div>
-
+        <section className="academic-dossier p-6 sm:p-7"><div className="mb-5 flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#ffeddd] text-sm font-bold text-[#a95b25]">2</span><h2 className="text-lg">Check your audio</h2></div><MicCheck onReadyChange={setHardwareReady} />
+          <div className="mt-6 border-t border-[var(--border-subtle)] pt-6"><label htmlFor="exam-consent" className="flex cursor-pointer items-start gap-3 text-sm leading-relaxed"><input id="exam-consent" type="checkbox" checked={consentGiven} onChange={e => setConsentGiven(e.target.checked)} className="mt-1 h-4 w-4 shrink-0" /><span>I agree to the viva rules and consent to audio recording and transcription for assessment and faculty review.</span></label>
+          {submitError && <p role="alert" className="mt-4 text-sm text-[var(--status-danger)]">{submitError}</p>}
+          <button onClick={handleStartExam} disabled={!canStart} className="btn-primary mt-6 w-full">{submitting ? 'Opening your viva…' : 'Enter Live Examination Room'}<ArrowRight className="h-4 w-4" /></button><p className="mt-3 text-center text-xs text-[var(--text-muted)]">Your timer starts when you enter the viva.</p></div>
+        </section>
       </div>
     </div>
   );
